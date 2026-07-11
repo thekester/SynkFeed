@@ -1,0 +1,13 @@
+.dart_tool/
+.packages
+build/
+.idea/
+.vscode/
+coverage/
+**/.dart_tool/
+**/.packages
+**/build/
+**/*.g.dart
+**/*.freezed.dart
+**/*.mocks.dart
+packages/synkfeed_core/pubspec.lock

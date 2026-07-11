@@ -1,0 +1,11 @@
+library synkfeed_core;
+
+export 'src/models/article.dart';
+export 'src/models/article_state.dart';
+export 'src/models/feed.dart';
+export 'src/models/sync_operation.dart';
+export 'src/repository/local_feed_repository.dart';
+export 'src/repository/memory_local_feed_repository.dart';
+export 'src/rss/parsed_article.dart';
+export 'src/rss/parsed_feed.dart';
+export 'src/rss/rss_parser.dart';

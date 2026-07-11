@@ -1,0 +1,14 @@
+name: synkfeed_core
+description: Core domain models, RSS parsing, and local repository logic for SynkFeed.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  xml: ^7.0.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.26.3
