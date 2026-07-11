@@ -1,4 +1,4 @@
-name: Build packages
+name: Build release packages
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   android-apk:
-    name: Build Android APK
+    name: Build signed Android APK
     runs-on: ubuntu-latest
 
     defaults:
@@ -44,25 +44,175 @@ jobs:
       - name: Fetch dependencies
         run: flutter pub get
 
-      # Debug APK is installable on test devices without release signing secrets.
-      - name: Build APK
-        run: flutter build apk --debug
+      - name: Prepare Android signing
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ] || [ -z "${ANDROID_KEYSTORE_PASSWORD:-}" ] || [ -z "${ANDROID_KEY_ALIAS:-}" ] || [ -z "${ANDROID_KEY_PASSWORD:-}" ]; then
+            echo "Missing Android signing secrets. Configure ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD." >&2
+            exit 1
+          fi
+
+          mkdir -p android/app
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=../app/upload-keystore.jks\n' \
+            "$ANDROID_KEYSTORE_PASSWORD" \
+            "$ANDROID_KEY_PASSWORD" \
+            "$ANDROID_KEY_ALIAS" \
+            > android/key.properties
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          app_dir = Path("android/app")
+          kotlin_file = app_dir / "build.gradle.kts"
+          groovy_file = app_dir / "build.gradle"
+
+          if kotlin_file.exists():
+              path = kotlin_file
+              text = path.read_text()
+
+              if "keystoreProperties = Properties()" not in text:
+                  text = (
+                      "import java.io.FileInputStream\n"
+                      "import java.util.Properties\n\n"
+                      "val keystoreProperties = Properties()\n"
+                      'val keystorePropertiesFile = rootProject.file("key.properties")\n'
+                      "if (keystorePropertiesFile.exists()) {\n"
+                      "    keystoreProperties.load(FileInputStream(keystorePropertiesFile))\n"
+                      "}\n\n"
+                  ) + text
+
+              if 'create("release")' not in text:
+                  def add_signing_block(match: re.Match[str]) -> str:
+                      indent = match.group(1)
+                      return (
+                          f"{indent}signingConfigs {{\n"
+                          f"{indent}    create(\"release\") {{\n"
+                          f"{indent}        keyAlias = keystoreProperties[\"keyAlias\"] as String\n"
+                          f"{indent}        keyPassword = keystoreProperties[\"keyPassword\"] as String\n"
+                          f"{indent}        storeFile = keystoreProperties[\"storeFile\"]?.let {{ file(it) }}\n"
+                          f"{indent}        storePassword = keystoreProperties[\"storePassword\"] as String\n"
+                          f"{indent}    }}\n"
+                          f"{indent}}}\n\n"
+                          f"{match.group(0)}"
+                      )
+
+                  text, replaced = re.subn(r"(?m)^(\s*)buildTypes\s*\{", add_signing_block, text, count=1)
+                  if replaced != 1:
+                      raise SystemExit("Could not insert Android signingConfigs block")
+
+              text = text.replace(
+                  'signingConfig = signingConfigs.getByName("debug")',
+                  'signingConfig = signingConfigs.getByName("release")',
+              )
+
+              if 'signingConfig = signingConfigs.getByName("release")' not in text:
+                  text, replaced = re.subn(
+                      r"(?m)^(\s*)release\s*\{",
+                      lambda match: (
+                          f"{match.group(0)}\n"
+                          f'{match.group(1)}    signingConfig = signingConfigs.getByName("release")'
+                      ),
+                      text,
+                      count=1,
+                  )
+                  if replaced != 1:
+                      raise SystemExit("Could not insert Android release signingConfig")
+
+              text = text.replace(
+                  'signingConfig = signingConfigs.getByName("debug")',
+                  'signingConfig = signingConfigs.getByName("release")',
+              )
+
+              path.write_text(text)
+          elif groovy_file.exists():
+              path = groovy_file
+              text = path.read_text()
+
+              if "def keystoreProperties = new Properties()" not in text:
+                  text = (
+                      "import java.io.FileInputStream\n"
+                      "import java.util.Properties\n\n"
+                      "def keystoreProperties = new Properties()\n"
+                      "def keystorePropertiesFile = rootProject.file('key.properties')\n"
+                      "if (keystorePropertiesFile.exists()) {\n"
+                      "    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))\n"
+                      "}\n\n"
+                  ) + text
+
+              if "signingConfigs {" not in text:
+                  def add_signing_block(match: re.Match[str]) -> str:
+                      indent = match.group(1)
+                      return (
+                          f"{indent}signingConfigs {{\n"
+                          f"{indent}    release {{\n"
+                          f"{indent}        keyAlias = keystoreProperties['keyAlias']\n"
+                          f"{indent}        keyPassword = keystoreProperties['keyPassword']\n"
+                          f"{indent}        storeFile = keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null\n"
+                          f"{indent}        storePassword = keystoreProperties['storePassword']\n"
+                          f"{indent}    }}\n"
+                          f"{indent}}}\n\n"
+                          f"{match.group(0)}"
+                      )
+
+                  text, replaced = re.subn(r"(?m)^(\s*)buildTypes\s*\{", add_signing_block, text, count=1)
+                  if replaced != 1:
+                      raise SystemExit("Could not insert Android signingConfigs block")
+
+              text = text.replace(
+                  "signingConfig signingConfigs.debug",
+                  "signingConfig signingConfigs.release",
+              )
+
+              if "signingConfig signingConfigs.release" not in text:
+                  text, replaced = re.subn(
+                      r"(?m)^(\s*)release\s*\{",
+                      lambda match: (
+                          f"{match.group(0)}\n"
+                          f"{match.group(1)}    signingConfig signingConfigs.release"
+                      ),
+                      text,
+                      count=1,
+                  )
+                  if replaced != 1:
+                      raise SystemExit("Could not insert Android release signingConfig")
+
+              text = text.replace(
+                  "signingConfig signingConfigs.debug",
+                  "signingConfig signingConfigs.release",
+              )
+
+              path.write_text(text)
+          else:
+              raise SystemExit("Android Gradle build file not found")
+          PY
+
+      - name: Build release APK
+        run: flutter build apk --release
 
       - name: Prepare artifact
         shell: bash
         run: |
-          cp build/app/outputs/flutter-apk/app-debug.apk "$GITHUB_WORKSPACE/SynkFeed-android-debug.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/SynkFeed-android-release.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: synkfeed-android-debug-apk
-          path: SynkFeed-android-debug.apk
+          name: synkfeed-android-release-apk
+          path: SynkFeed-android-release.apk
           if-no-files-found: error
           retention-days: 14
 
   windows-exe:
-    name: Build Windows executable
+    name: Build Windows release bundle
     runs-on: windows-latest
 
     defaults:
@@ -94,20 +244,20 @@ jobs:
       - name: Package Windows artifact
         shell: pwsh
         run: |
-          $artifact = Join-Path $env:GITHUB_WORKSPACE 'SynkFeed-windows-x64.zip'
+          $artifact = Join-Path $env:GITHUB_WORKSPACE 'SynkFeed-windows-release-x64.zip'
           if (Test-Path $artifact) { Remove-Item $artifact -Force }
           Compress-Archive -Path 'build/windows/x64/runner/Release/*' -DestinationPath $artifact
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: synkfeed-windows-x64-zip
-          path: SynkFeed-windows-x64.zip
+          name: synkfeed-windows-release-x64-zip
+          path: SynkFeed-windows-release-x64.zip
           if-no-files-found: error
           retention-days: 14
 
   linux-binary:
-    name: Build Linux binary bundle
+    name: Build Linux release bundle
     runs-on: ubuntu-latest
 
     defaults:
@@ -144,12 +294,12 @@ jobs:
       - name: Package Linux artifact
         shell: bash
         run: |
-          tar -czf "$GITHUB_WORKSPACE/SynkFeed-linux-x64.tar.gz" -C build/linux/x64/release/bundle .
+          tar -czf "$GITHUB_WORKSPACE/SynkFeed-linux-release-x64.tar.gz" -C build/linux/x64/release/bundle .
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: synkfeed-linux-x64-tarball
-          path: SynkFeed-linux-x64.tar.gz
+          name: synkfeed-linux-release-x64-tarball
+          path: SynkFeed-linux-release-x64.tar.gz
           if-no-files-found: error
           retention-days: 14

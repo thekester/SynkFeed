@@ -27,8 +27,14 @@ Open-source, offline-first RSS reader for Android, Windows, and Linux, with seam
 ## GitHub Actions
 
 - `ci.yml` runs Dart and Flutter checks on pushes and pull requests.
-- `build-packages.yml` produces installable artifacts for Android APK, Windows ZIP, and Linux tarball on manual dispatch or tags.
-- The Android artifact is currently a debug APK so it can be installed without release signing secrets.
+- `build-packages.yml` produces release artifacts for Android APK, Windows ZIP, and Linux tarball on manual dispatch or tags.
+- The Android artifact is a signed release APK. Configure these GitHub secrets before running release builds:
+  - `ANDROID_KEYSTORE_BASE64`
+  - `ANDROID_KEYSTORE_PASSWORD`
+  - `ANDROID_KEY_ALIAS`
+  - `ANDROID_KEY_PASSWORD`
+- Create the keystore with `keytool`, base64-encode the `.jks` file, and store the passwords and alias as GitHub secrets.
+- Windows and Linux builds are release builds, but they are not code-signed yet.
 
 ## Specification
 
