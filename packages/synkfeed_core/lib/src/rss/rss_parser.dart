@@ -1,7 +1,6 @@
-import 'dart:io';
-
 import 'package:xml/xml.dart';
 
+import 'http_dates.dart';
 import 'parsed_article.dart';
 import 'parsed_feed.dart';
 
@@ -197,12 +196,7 @@ class RssParser {
     if (value == null || value.trim().isEmpty) {
       return null;
     }
-    final raw = value.trim();
-    try {
-      return HttpDate.parse(raw).toUtc();
-    } catch (_) {
-      return DateTime.tryParse(raw)?.toUtc();
-    }
+    return parseHttpDate(value.trim());
   }
 
   String _stripHtml(String input) {

@@ -1,13 +1,26 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:http/http.dart' as http;
 
 import '../models/article.dart';
 import '../models/feed.dart';
 import '../repository/local_feed_repository.dart';
+import 'http_dates.dart';
 import 'rss_parser.dart';
+
+/// The feed endpoint answered with a non-success HTTP status.
+class FeedFetchException implements Exception {
+  const FeedFetchException(this.message, {this.statusCode, this.uri});
+
+  final String message;
+  final int? statusCode;
+  final Uri? uri;
+
+  @override
+  String toString() => 'FeedFetchException: $message';
+}
 
 class FeedImportResult {
   const FeedImportResult({
@@ -47,12 +60,15 @@ class HttpFeedDocumentFetcher implements FeedDocumentFetcher {
   HttpFeedDocumentFetcher({
     this.timeout = const Duration(seconds: 20),
     this.maximumResponseBytes = 5 * 1024 * 1024,
-    HttpClient? client,
-  }) : _client = client ?? HttpClient();
+    http.Client? client,
+  }) : _client = client ?? http.Client();
 
   final Duration timeout;
   final int maximumResponseBytes;
-  final HttpClient _client;
+  final http.Client _client;
+
+  /// Browsers own the User-Agent header and reject attempts to set it.
+  static const bool _isWeb = bool.fromEnvironment('dart.library.js_interop');
 
   @override
   Future<FeedDocumentResponse> fetch(
@@ -61,22 +77,22 @@ class HttpFeedDocumentFetcher implements FeedDocumentFetcher {
     DateTime? lastModified,
   }) async {
     _validateHttpUrl(url);
-    final request = await _client.getUrl(url).timeout(timeout);
-    request.headers.set(HttpHeaders.acceptHeader, _acceptedFeedTypes);
-    request.headers.set(HttpHeaders.userAgentHeader, 'SynkFeed/0.1');
+    final request = http.Request('GET', url);
+    request.headers['accept'] = _acceptedFeedTypes;
+    if (!_isWeb) {
+      request.headers['user-agent'] = 'SynkFeed/0.1';
+    }
     if (etag != null) {
-      request.headers.set(HttpHeaders.ifNoneMatchHeader, etag);
+      request.headers['if-none-match'] = etag;
     }
     if (lastModified != null) {
-      request.headers.set(
-        HttpHeaders.ifModifiedSinceHeader,
-        HttpDate.format(lastModified.toUtc()),
+      request.headers['if-modified-since'] = formatHttpDate(
+        lastModified.toUtc(),
       );
     }
 
-    final response = await request.close().timeout(timeout);
-    if (response.statusCode == HttpStatus.notModified) {
-      await response.drain<void>();
+    final response = await _client.send(request).timeout(timeout);
+    if (response.statusCode == 304) {
       return FeedDocumentResponse(
         body: '',
         etag: etag,
@@ -85,21 +101,20 @@ class HttpFeedDocumentFetcher implements FeedDocumentFetcher {
       );
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      await response.drain<void>();
-      throw HttpException(
+      throw FeedFetchException(
         'Feed request failed with HTTP ${response.statusCode}.',
+        statusCode: response.statusCode,
         uri: url,
       );
     }
 
-    final declaredLength = response.contentLength;
+    final declaredLength = response.contentLength ?? 0;
     if (declaredLength > maximumResponseBytes) {
-      await response.drain<void>();
       throw const FormatException('Feed response is too large.');
     }
 
     final bytes = <int>[];
-    await for (final chunk in response.timeout(timeout)) {
+    await for (final chunk in response.stream.timeout(timeout)) {
       bytes.addAll(chunk);
       if (bytes.length > maximumResponseBytes) {
         throw const FormatException('Feed response is too large.');
@@ -108,10 +123,8 @@ class HttpFeedDocumentFetcher implements FeedDocumentFetcher {
 
     return FeedDocumentResponse(
       body: utf8.decode(bytes, allowMalformed: true),
-      etag: response.headers.value(HttpHeaders.etagHeader),
-      lastModified: _parseHttpDate(
-        response.headers.value(HttpHeaders.lastModifiedHeader),
-      ),
+      etag: response.headers['etag'],
+      lastModified: parseHttpDate(response.headers['last-modified']),
     );
   }
 }
@@ -203,17 +216,6 @@ class FeedImporter {
         return feed;
       }
     }
-    return null;
-  }
-}
-
-DateTime? _parseHttpDate(String? value) {
-  if (value == null) {
-    return null;
-  }
-  try {
-    return HttpDate.parse(value).toUtc();
-  } on FormatException {
     return null;
   }
 }
