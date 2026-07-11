@@ -24,6 +24,12 @@ Open-source, offline-first RSS reader for Android, Windows, and Linux, with seam
 - The core package can be tested with the Dart SDK: `cd packages/synkfeed_core && dart test`.
 - The Flutter app shell is scaffolded for later validation once the Flutter SDK is installed.
 
+## GitHub Actions
+
+- `ci.yml` runs Dart and Flutter checks on pushes and pull requests.
+- `build-packages.yml` produces installable artifacts for Android APK, Windows ZIP, and Linux tarball on manual dispatch or tags.
+- The Android artifact is currently a debug APK so it can be installed without release signing secrets.
+
 ## Specification
 
 Detailed specification: [OPEN_RSS_READER_SPEC.md](./OPEN_RSS_READER_SPEC.md)

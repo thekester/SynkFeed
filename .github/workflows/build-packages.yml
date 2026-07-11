@@ -1,0 +1,155 @@
+name: Build packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: build-packages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  android-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: apps/reader
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Generate Android platform files
+        run: flutter create --platforms=android --org io.github.thekester --project-name synkfeed_reader .
+
+      - name: Fetch dependencies
+        run: flutter pub get
+
+      # Debug APK is installable on test devices without release signing secrets.
+      - name: Build APK
+        run: flutter build apk --debug
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          cp build/app/outputs/flutter-apk/app-debug.apk "$GITHUB_WORKSPACE/SynkFeed-android-debug.apk"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: synkfeed-android-debug-apk
+          path: SynkFeed-android-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-exe:
+    name: Build Windows executable
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: apps/reader
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Generate Windows platform files
+        run: flutter create --platforms=windows --org io.github.thekester --project-name synkfeed_reader .
+
+      - name: Fetch dependencies
+        run: flutter pub get
+
+      - name: Build Windows app
+        run: flutter build windows --release
+
+      - name: Package Windows artifact
+        shell: pwsh
+        run: |
+          $artifact = Join-Path $env:GITHUB_WORKSPACE 'SynkFeed-windows-x64.zip'
+          if (Test-Path $artifact) { Remove-Item $artifact -Force }
+          Compress-Archive -Path 'build/windows/x64/runner/Release/*' -DestinationPath $artifact
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: synkfeed-windows-x64-zip
+          path: SynkFeed-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  linux-binary:
+    name: Build Linux binary bundle
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: apps/reader
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable Linux desktop
+        run: flutter config --enable-linux-desktop
+
+      - name: Generate Linux platform files
+        run: flutter create --platforms=linux --org io.github.thekester --project-name synkfeed_reader .
+
+      - name: Fetch dependencies
+        run: flutter pub get
+
+      - name: Build Linux app
+        run: flutter build linux --release
+
+      - name: Package Linux artifact
+        shell: bash
+        run: |
+          tar -czf "$GITHUB_WORKSPACE/SynkFeed-linux-x64.tar.gz" -C build/linux/x64/release/bundle .
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: synkfeed-linux-x64-tarball
+          path: SynkFeed-linux-x64.tar.gz
+          if-no-files-found: error
+          retention-days: 14
