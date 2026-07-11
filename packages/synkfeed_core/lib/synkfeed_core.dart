@@ -1,5 +1,3 @@
-library synkfeed_core;
-
 export 'src/models/article.dart';
 export 'src/models/article_state.dart';
 export 'src/models/feed.dart';

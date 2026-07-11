@@ -1,5 +1,3 @@
-import 'dart:collection';
-
 import '../models/article.dart';
 import '../models/article_state.dart';
 import '../models/feed.dart';

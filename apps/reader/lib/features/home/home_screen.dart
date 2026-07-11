@@ -166,7 +166,7 @@ class _PanelCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       elevation: 0,
-      color: Theme.of(context).colorScheme.surface.withOpacity(0.88),
+      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.88),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -196,7 +196,7 @@ class _FeedList extends StatelessWidget {
 
     return ListView.separated(
       itemCount: feeds.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      separatorBuilder: (context, index) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
         final feed = feeds[index];
         final selected = feed.id == controller.selectedFeedId;
@@ -210,9 +210,8 @@ class _FeedList extends StatelessWidget {
               borderRadius: BorderRadius.circular(16),
               color: selected
                   ? Theme.of(context).colorScheme.primaryContainer
-                  : Theme.of(
-                      context,
-                    ).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                  : Theme.of(context).colorScheme.surfaceContainerHighest
+                        .withValues(alpha: 0.5),
             ),
             padding: const EdgeInsets.all(14),
             child: Row(
@@ -261,7 +260,7 @@ class _ArticleList extends StatelessWidget {
 
     return ListView.separated(
       itemCount: articles.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      separatorBuilder: (context, index) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
         final article = articles[index];
         final state = controller.stateFor(article.id);
@@ -276,7 +275,7 @@ class _ArticleList extends StatelessWidget {
               ? Theme.of(context).colorScheme.primaryContainer
               : Theme.of(
                   context,
-                ).colorScheme.surfaceContainerHighest.withOpacity(0.45),
+                ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
           onTap: () => controller.selectArticle(article.id),
           leading: Icon(
             state?.isStarred == true
