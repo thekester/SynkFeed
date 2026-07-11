@@ -4,9 +4,11 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:synkfeed_core/synkfeed_core.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/reader_demo_controller.dart';
 import '../../app/sync_account_controller.dart';
+import 'article_html_view.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({
@@ -1004,16 +1006,73 @@ class _ArticleReader extends StatelessWidget {
                 ),
               ),
             const SizedBox(height: 12),
+            Row(
+              children: [
+                if (article.contentHtml != null)
+                  SegmentedButton<ReaderViewMode>(
+                    showSelectedIcon: false,
+                    style: const ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    segments: const [
+                      ButtonSegment(
+                        value: ReaderViewMode.rich,
+                        label: Text('Rich'),
+                        icon: Icon(Icons.auto_awesome_rounded, size: 16),
+                      ),
+                      ButtonSegment(
+                        value: ReaderViewMode.simplified,
+                        label: Text('Text'),
+                        icon: Icon(Icons.notes_rounded, size: 16),
+                      ),
+                    ],
+                    selected: {controller.readerViewMode},
+                    onSelectionChanged: (selection) =>
+                        controller.setReaderViewMode(selection.single),
+                  ),
+                const Spacer(),
+                IconButton(
+                  tooltip: 'Open the original article',
+                  onPressed: () => launchUrl(
+                    article.canonicalUrl,
+                    mode: LaunchMode.externalApplication,
+                  ),
+                  icon: const Icon(Icons.open_in_new_rounded, size: 20),
+                ),
+                IconButton(
+                  tooltip: 'Copy link',
+                  onPressed: () async {
+                    await Clipboard.setData(
+                      ClipboardData(text: article.canonicalUrl.toString()),
+                    );
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Article link copied.')),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.link_rounded, size: 20),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
             Divider(color: colorScheme.outlineVariant.withValues(alpha: 0.6)),
             const SizedBox(height: 12),
-            Text(
-              article.contentText ??
-                  article.summary ??
-                  'No offline content captured yet.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyLarge?.copyWith(height: 1.6),
-            ),
+            if (controller.readerViewMode == ReaderViewMode.rich &&
+                article.contentHtml != null)
+              ArticleHtmlView(
+                html: article.contentHtml!,
+                baseUrl: article.canonicalUrl,
+              )
+            else
+              Text(
+                article.contentText ??
+                    article.summary ??
+                    'No offline content captured yet.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyLarge?.copyWith(height: 1.6),
+              ),
             const SizedBox(height: 24),
             Wrap(
               spacing: 12,
@@ -1032,18 +1091,12 @@ class _ArticleReader extends StatelessWidget {
                   ),
                 ),
                 OutlinedButton.icon(
-                  onPressed: () async {
-                    await Clipboard.setData(
-                      ClipboardData(text: article.canonicalUrl.toString()),
-                    );
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Article link copied.')),
-                      );
-                    }
-                  },
-                  icon: const Icon(Icons.link_rounded),
-                  label: const Text('Copy link'),
+                  onPressed: () => launchUrl(
+                    article.canonicalUrl,
+                    mode: LaunchMode.externalApplication,
+                  ),
+                  icon: const Icon(Icons.open_in_new_rounded),
+                  label: const Text('Open original'),
                 ),
               ],
             ),

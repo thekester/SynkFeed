@@ -11,9 +11,11 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   file_selector: ^1.1.0
+  html: ^0.15.4
   path_provider: ^2.1.5
   synkfeed_core:
     path: ../../packages/synkfeed_core
+  url_launcher: ^6.3.0
   web: ^1.1.0
 
 dev_dependencies:

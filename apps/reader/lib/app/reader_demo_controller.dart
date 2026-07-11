@@ -6,6 +6,9 @@ import 'package:synkfeed_core/synkfeed_core.dart';
 
 enum ArticleFilter { all, unread, starred }
 
+/// How the reader panel renders an article body.
+enum ReaderViewMode { rich, simplified }
+
 class OpmlImportReport {
   const OpmlImportReport({required this.imported, required this.failedUrls});
 
@@ -37,6 +40,7 @@ class ReaderDemoController extends ChangeNotifier {
   String? selectedFeedId;
   String? selectedArticleId;
   ArticleFilter articleFilter = ArticleFilter.all;
+  ReaderViewMode readerViewMode = ReaderViewMode.rich;
   String searchQuery = '';
 
   bool get isBootstrapped => _bootstrapped;
@@ -373,6 +377,14 @@ class ReaderDemoController extends ChangeNotifier {
     if (operation != null) {
       await reload();
     }
+  }
+
+  void setReaderViewMode(ReaderViewMode mode) {
+    if (readerViewMode == mode) {
+      return;
+    }
+    readerViewMode = mode;
+    notifyListeners();
   }
 
   /// Selects one feed, or every feed when [feedId] is null.
