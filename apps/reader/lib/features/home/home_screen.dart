@@ -86,28 +86,61 @@ class HomeScreen extends StatelessWidget {
                   ];
 
             final colorScheme = Theme.of(context).colorScheme;
+            final busy =
+                controller.isImporting ||
+                controller.isDemoLoading ||
+                syncController.isBusy;
             return Scaffold(
               backgroundColor: colorScheme.surfaceContainerLowest,
               appBar: AppBar(
                 backgroundColor: colorScheme.surfaceContainerLowest,
                 scrolledUnderElevation: 0,
-                title: Column(
+                titleSpacing: 16,
+                title: Row(
                   mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'SynkFeed',
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    Text(
-                      _statusLine(controller, syncController),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(11),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [colorScheme.primary, colorScheme.tertiary],
+                        ),
                       ),
+                      child: Icon(
+                        Icons.rss_feed_rounded,
+                        size: 20,
+                        color: colorScheme.onPrimary,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'SynkFeed',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          _statusLine(controller, syncController),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: colorScheme.onSurfaceVariant),
+                        ),
+                      ],
                     ),
                   ],
                 ),
                 actions: actions,
+                bottom: PreferredSize(
+                  preferredSize: const Size.fromHeight(2),
+                  child: busy
+                      ? const LinearProgressIndicator(minHeight: 2)
+                      : const SizedBox(height: 2),
+                ),
               ),
               body: SafeArea(child: body),
             );
@@ -227,6 +260,24 @@ class _SyncButton extends StatelessWidget {
               count: pending,
               child: const Icon(Icons.cloud_sync_rounded),
             ),
+    );
+  }
+}
+
+Future<void> _loadDemo(
+  BuildContext context,
+  ReaderDemoController controller,
+) async {
+  final korbenIsLive = await controller.loadDemoContent();
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          korbenIsLive
+              ? 'Demo library ready - including the live Korben feed.'
+              : 'Demo library ready (offline sample - refresh Korben once online).',
+        ),
+      ),
     );
   }
 }
@@ -446,7 +497,7 @@ class _FeedList extends StatelessWidget {
               Text(
                 syncController.isSignedIn
                     ? 'Press "Sync now" to download your subscriptions, or add a feed URL.'
-                    : 'Add an RSS/Atom URL, or connect to your server to bring your feeds here.',
+                    : 'Try the demo library, connect to your server, or add any RSS/Atom URL.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),
@@ -460,13 +511,32 @@ class _FeedList extends StatelessWidget {
                   icon: const Icon(Icons.cloud_sync_rounded),
                   label: const Text('Sync now'),
                 )
-              else
+              else ...[
                 FilledButton.icon(
+                  onPressed: controller.isDemoLoading
+                      ? null
+                      : () => _loadDemo(context, controller),
+                  icon: controller.isDemoLoading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.play_arrow_rounded),
+                  label: Text(
+                    controller.isDemoLoading
+                        ? 'Preparing the demo...'
+                        : 'Try the demo',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
                   onPressed: () =>
                       _showAccountDialog(context, controller, syncController),
                   icon: const Icon(Icons.cloud_rounded),
                   label: const Text('Connect to a server'),
                 ),
+              ],
               const SizedBox(height: 8),
               TextButton.icon(
                 onPressed: () => _showAddFeedDialog(context, controller),
@@ -480,10 +550,13 @@ class _FeedList extends StatelessWidget {
     }
 
     return ListView.separated(
-      itemCount: feeds.length,
+      itemCount: feeds.length + 1,
       separatorBuilder: (context, index) => const SizedBox(height: 6),
       itemBuilder: (context, index) {
-        final feed = feeds[index];
+        if (index == 0) {
+          return _AllArticlesTile(controller: controller);
+        }
+        final feed = feeds[index - 1];
         final selected = feed.id == controller.selectedFeedId;
         final unread = controller.unreadCountForFeed(feed.id);
 
@@ -623,21 +696,43 @@ class _ArticleList extends StatelessWidget {
           onFieldSubmitted: controller.setSearchQuery,
         ),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          children: ArticleFilter.values
-              .map((filter) {
-                return ChoiceChip(
-                  label: Text(switch (filter) {
-                    ArticleFilter.all => 'All',
-                    ArticleFilter.unread => 'Unread',
-                    ArticleFilter.starred => 'Favorites',
-                  }),
-                  selected: controller.articleFilter == filter,
-                  onSelected: (_) => controller.setArticleFilter(filter),
-                );
-              })
-              .toList(growable: false),
+        Row(
+          children: [
+            Expanded(
+              child: Wrap(
+                spacing: 8,
+                children: ArticleFilter.values
+                    .map((filter) {
+                      return ChoiceChip(
+                        label: Text(switch (filter) {
+                          ArticleFilter.all => 'All',
+                          ArticleFilter.unread => 'Unread',
+                          ArticleFilter.starred => 'Favorites',
+                        }),
+                        selected: controller.articleFilter == filter,
+                        onSelected: (_) => controller.setArticleFilter(filter),
+                      );
+                    })
+                    .toList(growable: false),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Mark all as read',
+              onPressed: articles.isEmpty
+                  ? null
+                  : () async {
+                      final changed = await controller.markAllRead();
+                      if (context.mounted && changed > 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('$changed article(s) marked read.'),
+                          ),
+                        );
+                      }
+                    },
+              icon: const Icon(Icons.done_all_rounded),
+            ),
+          ],
         ),
         const SizedBox(height: 8),
         Expanded(
@@ -670,6 +765,71 @@ class _ArticleList extends StatelessWidget {
                 ),
         ),
       ],
+    );
+  }
+}
+
+class _AllArticlesTile extends StatelessWidget {
+  const _AllArticlesTile({required this.controller});
+
+  final ReaderDemoController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final selected = controller.selectedFeedId == null;
+    final unread = controller.totalUnreadCount;
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => controller.selectFeed(null),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: selected ? colorScheme.secondaryContainer : null,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: selected
+                  ? colorScheme.primary
+                  : colorScheme.surfaceContainerHighest,
+              child: Icon(
+                Icons.all_inbox_rounded,
+                size: 16,
+                color: selected
+                    ? colorScheme.onPrimary
+                    : colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'All articles',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ),
+            if (unread > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: colorScheme.primary,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '$unread',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: colorScheme.onPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -799,88 +959,97 @@ class _ArticleReader extends StatelessWidget {
             '${published.hour.toString().padLeft(2, '0')}:${published.minute.toString().padLeft(2, '0')}',
     ].join('  -  ');
 
-    return ListView(
-      padding: const EdgeInsets.only(right: 4),
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: ListView(
+          padding: const EdgeInsets.only(right: 4),
           children: [
-            Expanded(
-              child: Text(
-                article.title,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  height: 1.25,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    article.title,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      height: 1.25,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: state?.isStarred == true
+                      ? 'Remove favorite'
+                      : 'Add to favorites',
+                  onPressed: controller.toggleSelectedStar,
+                  icon: Icon(
+                    state?.isStarred == true
+                        ? Icons.star_rounded
+                        : Icons.star_outline_rounded,
+                    color: state?.isStarred == true
+                        ? Colors.amber
+                        : colorScheme.outline,
+                  ),
+                ),
+              ],
+            ),
+            if (meta.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  meta,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
+            const SizedBox(height: 12),
+            Divider(color: colorScheme.outlineVariant.withValues(alpha: 0.6)),
+            const SizedBox(height: 12),
+            Text(
+              article.contentText ??
+                  article.summary ??
+                  'No offline content captured yet.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyLarge?.copyWith(height: 1.6),
             ),
-            IconButton(
-              tooltip: state?.isStarred == true
-                  ? 'Remove favorite'
-                  : 'Add to favorites',
-              onPressed: controller.toggleSelectedStar,
-              icon: Icon(
-                state?.isStarred == true
-                    ? Icons.star_rounded
-                    : Icons.star_outline_rounded,
-                color: state?.isStarred == true
-                    ? Colors.amber
-                    : colorScheme.outline,
-              ),
-            ),
-          ],
-        ),
-        if (meta.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              meta,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-        const SizedBox(height: 12),
-        Divider(color: colorScheme.outlineVariant.withValues(alpha: 0.6)),
-        const SizedBox(height: 12),
-        Text(
-          article.contentText ??
-              article.summary ??
-              'No offline content captured yet.',
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.6),
-        ),
-        const SizedBox(height: 24),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            FilledButton.tonalIcon(
-              onPressed: () =>
-                  controller.markSelectedRead(!(state?.isRead ?? false)),
-              icon: Icon(
-                state?.isRead == true
-                    ? Icons.visibility_off_rounded
-                    : Icons.visibility_rounded,
-              ),
-              label: Text(state?.isRead == true ? 'Mark unread' : 'Mark read'),
-            ),
-            OutlinedButton.icon(
-              onPressed: () async {
-                await Clipboard.setData(
-                  ClipboardData(text: article.canonicalUrl.toString()),
-                );
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Article link copied.')),
-                  );
-                }
-              },
-              icon: const Icon(Icons.link_rounded),
-              label: const Text('Copy link'),
+            const SizedBox(height: 24),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: () =>
+                      controller.markSelectedRead(!(state?.isRead ?? false)),
+                  icon: Icon(
+                    state?.isRead == true
+                        ? Icons.visibility_off_rounded
+                        : Icons.visibility_rounded,
+                  ),
+                  label: Text(
+                    state?.isRead == true ? 'Mark unread' : 'Mark read',
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    await Clipboard.setData(
+                      ClipboardData(text: article.canonicalUrl.toString()),
+                    );
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Article link copied.')),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.link_rounded),
+                  label: const Text('Copy link'),
+                ),
+              ],
             ),
           ],
         ),
-      ],
+      ),
     );
   }
 }

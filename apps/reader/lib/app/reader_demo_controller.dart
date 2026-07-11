@@ -26,6 +26,7 @@ class ReaderDemoController extends ChangeNotifier {
 
   bool _bootstrapped = false;
   bool _isImporting = false;
+  bool _isDemoLoading = false;
 
   List<Feed> _feeds = <Feed>[];
   List<Article> _articles = <Article>[];
@@ -40,6 +41,7 @@ class ReaderDemoController extends ChangeNotifier {
 
   bool get isBootstrapped => _bootstrapped;
   bool get isImporting => _isImporting;
+  bool get isDemoLoading => _isDemoLoading;
   List<Feed> get feeds => List<Feed>.unmodifiable(_feeds);
   List<Article> get articles => List<Article>.unmodifiable(_articles);
   List<Subscription> get subscriptions =>
@@ -134,9 +136,6 @@ class ReaderDemoController extends ChangeNotifier {
     }
     _bootstrapped = true;
     await reload();
-    if (selectedFeedId == null && _feeds.isNotEmpty) {
-      selectFeed(_feeds.first.id);
-    }
     notifyListeners();
   }
 
@@ -376,11 +375,208 @@ class ReaderDemoController extends ChangeNotifier {
     }
   }
 
-  void selectFeed(String feedId) {
+  /// Selects one feed, or every feed when [feedId] is null.
+  void selectFeed(String? feedId) {
     selectedFeedId = feedId;
     final feedArticles = articlesForFeed(feedId);
     selectedArticleId = feedArticles.isEmpty ? null : feedArticles.first.id;
     notifyListeners();
+  }
+
+  /// Marks every article currently listed (feed + filter + search) as read.
+  /// Returns how many articles changed.
+  Future<int> markAllRead() async {
+    final targets = articlesForFeed(
+      selectedFeedId,
+    ).where((article) => !isRead(article.id)).toList(growable: false);
+    for (final article in targets) {
+      await repository.markArticleRead(
+        userId: _userId,
+        deviceId: _deviceId,
+        clientSequence: await repository.nextClientSequence(_deviceId),
+        articleId: article.id,
+        isRead: true,
+        occurredAt: DateTime.now().toUtc(),
+      );
+    }
+    if (targets.isNotEmpty) {
+      await reload();
+    }
+    return targets.length;
+  }
+
+  /// Fills the library with sample content so visitors can try the reader
+  /// without an account: a short built-in guide plus the Korben feed
+  /// (downloaded live when reachable, bundled teasers otherwise).
+  ///
+  /// Returns true when the live Korben feed could be downloaded.
+  Future<bool> loadDemoContent() async {
+    if (_isImporting || _isDemoLoading) {
+      return false;
+    }
+    _isDemoLoading = true;
+    notifyListeners();
+    var korbenIsLive = true;
+    try {
+      await _seedWelcomeFeed();
+      final korbenUrl = kIsWeb
+          ? Uri.base.resolve('demo/korben-feed').toString()
+          : 'https://korben.info/feed/';
+      try {
+        await addFeedFromUrl(korbenUrl);
+      } on Object {
+        korbenIsLive = false;
+        await _seedOfflineKorben();
+      }
+      await reload();
+      selectFeed(null);
+      return korbenIsLive;
+    } finally {
+      _isDemoLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _seedWelcomeFeed() async {
+    final now = DateTime.now().toUtc();
+    const feedId = 'demo-welcome';
+    await repository.upsertFeed(
+      Feed(
+        id: feedId,
+        canonicalUrl: Uri.parse('https://github.com/thekester/SynkFeed'),
+        feedUrl: Uri.parse('https://github.com/thekester/SynkFeed'),
+        siteUrl: Uri.parse('https://github.com/thekester/SynkFeed'),
+        title: 'Welcome to SynkFeed',
+        description: 'A short tour of the reader.',
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+    if (subscriptionForFeed(feedId) == null) {
+      await repository.upsertSubscription(
+        Subscription(
+          id: 'subscription-$feedId',
+          userId: _userId,
+          feedId: feedId,
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+    }
+    await repository.upsertArticles(_welcomeArticles(feedId, now));
+  }
+
+  Future<void> _seedOfflineKorben() async {
+    final now = DateTime.now().toUtc();
+    const feedId = 'demo-korben';
+    await repository.upsertFeed(
+      Feed(
+        id: feedId,
+        canonicalUrl: Uri.parse('https://korben.info'),
+        feedUrl: Uri.parse('https://korben.info/feed/'),
+        siteUrl: Uri.parse('https://korben.info'),
+        title: 'Korben',
+        description: 'Upgrade your mind - korben.info',
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+    if (subscriptionForFeed(feedId) == null) {
+      await repository.upsertSubscription(
+        Subscription(
+          id: 'subscription-$feedId',
+          userId: _userId,
+          feedId: feedId,
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+    }
+    await repository.upsertArticles([
+      Article(
+        id: 'demo-korben-1',
+        feedId: feedId,
+        externalId: 'demo-korben-1',
+        canonicalUrl: Uri.parse('https://korben.info'),
+        title: 'Korben - Upgrade your mind',
+        summary:
+            'The live feed could not be downloaded right now. Reconnect and '
+            'refresh the feed to pull the real articles from korben.info.',
+        contentText:
+            'korben.info covers tech news, open source, security, and DIY '
+            'projects in French. In the full experience this feed is '
+            'downloaded automatically with complete articles for offline '
+            'reading. Press the refresh button when you are back online.',
+        publishedAt: now,
+        insertedAt: now,
+      ),
+    ]);
+  }
+
+  List<Article> _welcomeArticles(String feedId, DateTime now) {
+    Article article({
+      required String slug,
+      required String title,
+      required String summary,
+      required String body,
+      required int minutesAgo,
+    }) {
+      return Article(
+        id: 'demo-welcome-$slug',
+        feedId: feedId,
+        externalId: 'demo-welcome-$slug',
+        canonicalUrl: Uri.parse('https://github.com/thekester/SynkFeed'),
+        title: title,
+        summary: summary,
+        contentText: body,
+        publishedAt: now.subtract(Duration(minutes: minutesAgo)),
+        insertedAt: now,
+      );
+    }
+
+    return [
+      article(
+        slug: 'hello',
+        title: 'Welcome to SynkFeed 👋',
+        summary: 'A fast, offline-first RSS reader you can self-host.',
+        body:
+            'SynkFeed keeps your articles on your device so you can read '
+            'them anywhere, then synchronizes your read and favorite states '
+            'across devices through your own server.\n\n'
+            'This library is a demo: browse the articles on the left, star '
+            'the ones you like, and use the filters at the top. Nothing '
+            'leaves your browser until you connect an account.',
+        minutesAgo: 2,
+      ),
+      article(
+        slug: 'sync',
+        title: 'Bring your own server: FreshRSS or SynkFeed',
+        summary: 'One account, every device - reads and favorites follow you.',
+        body:
+            'Press the cloud button in the top bar to connect this reader to '
+            'a FreshRSS instance (Google Reader API) or to a native SynkFeed '
+            'server.\n\n'
+            'Once connected, your subscriptions are downloaded with full '
+            'article content, and everything you read or star here shows up '
+            'on your phone, your desktop, and any other RSS client connected '
+            'to the same account.',
+        minutesAgo: 12,
+      ),
+      article(
+        slug: 'tips',
+        title: 'Three tips to get the most out of the reader',
+        summary: 'Filters, favorites, and OPML import/export.',
+        body:
+            '1. The Unread and Favorites filters above the article list keep '
+            'long feeds manageable, and the search box matches titles.\n\n'
+            '2. The star next to each article saves it as a favorite - '
+            'favorites are protected from automatic cleanup.\n\n'
+            '3. Coming from another reader? Use the menu to import your '
+            'subscriptions as OPML, and export them anytime. Your data '
+            'stays yours.',
+        minutesAgo: 25,
+      ),
+    ];
   }
 
   void selectArticle(String articleId) {
@@ -400,9 +596,10 @@ class ReaderDemoController extends ChangeNotifier {
       return;
     }
 
-    if (selectedFeedId == null ||
+    // A removed feed falls back to the "all articles" view.
+    if (selectedFeedId != null &&
         _feeds.every((feed) => feed.id != selectedFeedId)) {
-      selectedFeedId = _feeds.first.id;
+      selectedFeedId = null;
     }
 
     final feedArticles = articlesForFeed(selectedFeedId);
