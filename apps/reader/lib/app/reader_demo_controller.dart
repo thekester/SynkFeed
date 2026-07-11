@@ -2,29 +2,46 @@ import 'package:flutter/foundation.dart';
 
 import 'package:synkfeed_core/synkfeed_core.dart';
 
+enum ArticleFilter { all, unread, starred }
+
+class OpmlImportReport {
+  const OpmlImportReport({required this.imported, required this.failedUrls});
+
+  final int imported;
+  final List<Uri> failedUrls;
+}
+
 class ReaderDemoController extends ChangeNotifier {
-  ReaderDemoController({MemoryLocalFeedRepository? repository})
-    : repository = repository ?? MemoryLocalFeedRepository();
+  ReaderDemoController({
+    required this.repository,
+    FeedDocumentFetcher? feedFetcher,
+  }) : _importer = FeedImporter(repository: repository, fetcher: feedFetcher);
 
-  final MemoryLocalFeedRepository repository;
-  final RssParser _parser = const RssParser();
-  final String _userId = 'demo-user';
-  final String _deviceId = 'demo-device';
+  final LocalFeedRepository repository;
+  final FeedImporter _importer;
+  final String _userId = 'local-user';
+  final String _deviceId = 'local-device';
 
-  int _clientSequence = 0;
   bool _bootstrapped = false;
+  bool _isImporting = false;
 
   List<Feed> _feeds = <Feed>[];
   List<Article> _articles = <Article>[];
+  List<Subscription> _subscriptions = <Subscription>[];
   Map<String, ArticleState> _statesByArticleId = <String, ArticleState>{};
   List<SyncOperation> _pendingOperations = <SyncOperation>[];
 
   String? selectedFeedId;
   String? selectedArticleId;
+  ArticleFilter articleFilter = ArticleFilter.all;
+  String searchQuery = '';
 
   bool get isBootstrapped => _bootstrapped;
+  bool get isImporting => _isImporting;
   List<Feed> get feeds => List<Feed>.unmodifiable(_feeds);
   List<Article> get articles => List<Article>.unmodifiable(_articles);
+  List<Subscription> get subscriptions =>
+      List<Subscription>.unmodifiable(_subscriptions);
   List<SyncOperation> get pendingOperations =>
       List<SyncOperation>.unmodifiable(_pendingOperations);
   int get pendingOperationCount => _pendingOperations.length;
@@ -68,12 +85,23 @@ class ReaderDemoController extends ChangeNotifier {
 
   bool isStarred(String articleId) => stateFor(articleId)?.isStarred ?? false;
 
+  Subscription? subscriptionForFeed(String feedId) {
+    for (final subscription in _subscriptions) {
+      if (subscription.feedId == feedId) {
+        return subscription;
+      }
+    }
+    return null;
+  }
+
+  String titleForFeed(Feed feed) =>
+      subscriptionForFeed(feed.id)?.customTitle ?? feed.title;
+
   Future<void> bootstrap() async {
     if (_bootstrapped) {
       return;
     }
     _bootstrapped = true;
-    await _seedDemoContent();
     await reload();
     if (selectedFeedId == null && _feeds.isNotEmpty) {
       selectFeed(_feeds.first.id);
@@ -82,8 +110,28 @@ class ReaderDemoController extends ChangeNotifier {
   }
 
   Future<void> reload() async {
-    _feeds = await repository.listFeeds();
-    _articles = await repository.listArticles(userId: _userId);
+    _subscriptions = await repository.listSubscriptions(userId: _userId);
+    final subscribedFeedIds = _subscriptions
+        .map((subscription) => subscription.feedId)
+        .toSet();
+    _feeds =
+        (await repository.listFeeds())
+            .where((feed) => subscribedFeedIds.contains(feed.id))
+            .toList(growable: false)
+          ..sort(
+            (a, b) => titleForFeed(
+              a,
+            ).toLowerCase().compareTo(titleForFeed(b).toLowerCase()),
+          );
+    _articles =
+        (await repository.listArticles(
+              userId: _userId,
+              unreadOnly: articleFilter == ArticleFilter.unread,
+              starredOnly: articleFilter == ArticleFilter.starred,
+              searchQuery: searchQuery,
+            ))
+            .where((article) => subscribedFeedIds.contains(article.feedId))
+            .toList(growable: false);
     _pendingOperations = await repository.listPendingOperations();
 
     final states = <String, ArticleState>{};
@@ -102,30 +150,153 @@ class ReaderDemoController extends ChangeNotifier {
   }
 
   Future<void> addFeedFromUrl(String rawUrl) async {
-    final uri = Uri.tryParse(rawUrl.trim());
-    if (uri == null || (!uri.hasScheme && uri.host.isEmpty)) {
-      throw FormatException('Please provide a valid RSS or Atom URL.');
+    if (_isImporting) {
+      return;
     }
+    final uri = Uri.tryParse(rawUrl.trim());
+    if (uri == null ||
+        !uri.hasScheme ||
+        uri.host.isEmpty ||
+        (uri.scheme != 'http' && uri.scheme != 'https')) {
+      throw const FormatException(
+        'Please provide a valid HTTP(S) RSS or Atom URL.',
+      );
+    }
+    _isImporting = true;
+    notifyListeners();
+    try {
+      final result = await _importer.import(uri);
+      final now = DateTime.now().toUtc();
+      final existing = subscriptionForFeed(result.feed.id);
+      await repository.upsertSubscription(
+        Subscription(
+          id: existing?.id ?? 'subscription-${result.feed.id}',
+          userId: _userId,
+          feedId: result.feed.id,
+          folderId: existing?.folderId,
+          customTitle: existing?.customTitle,
+          isMuted: existing?.isMuted ?? false,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+          syncVersion: existing?.syncVersion ?? 0,
+        ),
+      );
+      await reload();
+      selectFeed(result.feed.id);
+    } finally {
+      _isImporting = false;
+      notifyListeners();
+    }
+  }
 
-    final now = DateTime.now().toUtc();
-    final id = 'manual-${_feeds.length + 1}';
-    final title = uri.host.isEmpty ? uri.toString() : uri.host;
+  Future<void> refreshSelectedFeed() async {
+    final feed = selectedFeed;
+    if (feed == null || _isImporting) {
+      return;
+    }
+    await addFeedFromUrl(feed.feedUrl.toString());
+  }
 
-    await repository.upsertFeed(
-      Feed(
-        id: id,
-        canonicalUrl: uri,
-        feedUrl: uri,
-        siteUrl: uri,
-        title: title,
-        description: 'Manually added feed URL',
-        createdAt: now,
-        updatedAt: now,
+  Future<void> renameFeed(String feedId, String? customTitle) async {
+    final subscription = subscriptionForFeed(feedId);
+    if (subscription == null) {
+      return;
+    }
+    final normalized = customTitle?.trim();
+    await repository.upsertSubscription(
+      subscription.copyWith(
+        customTitle: normalized == null || normalized.isEmpty
+            ? null
+            : normalized,
+        updatedAt: DateTime.now().toUtc(),
+        syncVersion: subscription.syncVersion + 1,
       ),
     );
-
     await reload();
-    selectFeed(id);
+  }
+
+  Future<void> removeFeed(String feedId) async {
+    final subscription = subscriptionForFeed(feedId);
+    if (subscription == null) {
+      return;
+    }
+    await repository.deleteSubscription(
+      subscriptionId: subscription.id,
+      deletedAt: DateTime.now().toUtc(),
+    );
+    await reload();
+  }
+
+  Future<void> setArticleFilter(ArticleFilter value) async {
+    if (articleFilter == value) {
+      return;
+    }
+    articleFilter = value;
+    await reload();
+  }
+
+  Future<void> setSearchQuery(String value) async {
+    final normalized = value.trim();
+    if (searchQuery == normalized) {
+      return;
+    }
+    searchQuery = normalized;
+    await reload();
+  }
+
+  Future<OpmlImportReport> importOpml(String source) async {
+    final document = OpmlDocument.parse(source);
+    var imported = 0;
+    final failed = <Uri>[];
+    for (final entry in document.entries) {
+      try {
+        await addFeedFromUrl(entry.feedUrl.toString());
+        Feed? importedFeed;
+        for (final feed in _feeds) {
+          if (feed.feedUrl == entry.feedUrl) {
+            importedFeed = feed;
+            break;
+          }
+        }
+        if (importedFeed != null && entry.title != importedFeed.title) {
+          await renameFeed(importedFeed.id, entry.title);
+        }
+        imported += 1;
+      } on Object {
+        failed.add(entry.feedUrl);
+      }
+    }
+    return OpmlImportReport(
+      imported: imported,
+      failedUrls: List<Uri>.unmodifiable(failed),
+    );
+  }
+
+  String exportOpml() {
+    final entries = _feeds
+        .map((feed) {
+          return OpmlEntry(
+            title: titleForFeed(feed),
+            feedUrl: feed.feedUrl,
+            siteUrl: feed.siteUrl,
+          );
+        })
+        .toList(growable: false);
+    return OpmlDocument(entries).encode();
+  }
+
+  Future<RetentionPolicy> loadRetentionPolicy() {
+    return repository.getRetentionPolicy(_userId);
+  }
+
+  Future<int> saveRetentionPolicy(RetentionPolicy policy) async {
+    await repository.saveRetentionPolicy(_userId, policy);
+    final removed = await repository.cleanUpArticles(
+      userId: _userId,
+      now: DateTime.now().toUtc(),
+    );
+    await reload();
+    return removed;
   }
 
   Future<void> markSelectedRead(bool value) async {
@@ -137,7 +308,7 @@ class ReaderDemoController extends ChangeNotifier {
     final operation = await repository.markArticleRead(
       userId: _userId,
       deviceId: _deviceId,
-      clientSequence: ++_clientSequence,
+      clientSequence: await repository.nextClientSequence(_deviceId),
       articleId: articleId,
       isRead: value,
       occurredAt: DateTime.now().toUtc(),
@@ -157,7 +328,7 @@ class ReaderDemoController extends ChangeNotifier {
     final operation = await repository.toggleArticleStar(
       userId: _userId,
       deviceId: _deviceId,
-      clientSequence: ++_clientSequence,
+      clientSequence: await repository.nextClientSequence(_deviceId),
       articleId: articleId,
       isStarred: !isStarred(articleId),
       occurredAt: DateTime.now().toUtc(),
@@ -178,72 +349,6 @@ class ReaderDemoController extends ChangeNotifier {
   void selectArticle(String articleId) {
     selectedArticleId = articleId;
     notifyListeners();
-  }
-
-  Future<void> _seedDemoContent() async {
-    final now = DateTime.now().toUtc();
-
-    final rssFeed = _parser.parse(
-      _demoRss,
-      feedUrl: Uri.parse('https://example.com/news.xml'),
-    );
-    final atomFeed = _parser.parse(
-      _demoAtom,
-      feedUrl: Uri.parse('https://example.com/dispatch.xml'),
-    );
-
-    await _storeParsedFeed(
-      feedId: 'demo-rss',
-      parsedFeed: rssFeed,
-      createdAt: now,
-    );
-    await _storeParsedFeed(
-      feedId: 'demo-atom',
-      parsedFeed: atomFeed,
-      createdAt: now,
-    );
-  }
-
-  Future<void> _storeParsedFeed({
-    required String feedId,
-    required ParsedFeed parsedFeed,
-    required DateTime createdAt,
-  }) async {
-    await repository.upsertFeed(
-      Feed(
-        id: feedId,
-        canonicalUrl: parsedFeed.siteUrl ?? parsedFeed.feedUrl,
-        feedUrl: parsedFeed.feedUrl,
-        siteUrl: parsedFeed.siteUrl,
-        title: parsedFeed.title,
-        description: parsedFeed.description,
-        language: parsedFeed.language,
-        createdAt: createdAt,
-        updatedAt: createdAt,
-      ),
-    );
-
-    final articles = <Article>[];
-    for (var index = 0; index < parsedFeed.articles.length; index += 1) {
-      final draft = parsedFeed.articles[index];
-      articles.add(
-        Article(
-          id: '$feedId-${index + 1}',
-          feedId: feedId,
-          externalId: draft.externalId,
-          canonicalUrl: draft.canonicalUrl ?? parsedFeed.feedUrl,
-          title: draft.title,
-          author: draft.author,
-          summary: draft.summary,
-          contentHtml: draft.contentHtml,
-          contentText: draft.contentText,
-          publishedAt: draft.publishedAt,
-          updatedAt: draft.updatedAt,
-          insertedAt: createdAt,
-        ),
-      );
-    }
-    await repository.upsertArticles(articles);
   }
 
   void _normalizeSelection() {
@@ -270,45 +375,3 @@ class ReaderDemoController extends ChangeNotifier {
     }
   }
 }
-
-const String _demoRss = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-  <channel>
-    <title>Local-first Dispatch</title>
-    <link>https://example.com</link>
-    <description>Offline-ready product updates</description>
-    <language>en</language>
-    <item>
-      <guid>dispatch-1</guid>
-      <title>Shipping the offline queue</title>
-      <link>https://example.com/dispatch/offline-queue</link>
-      <description><![CDATA[<p>The queue persists user actions while disconnected.</p>]]></description>
-      <pubDate>Wed, 10 Jul 2024 12:34:56 GMT</pubDate>
-    </item>
-    <item>
-      <guid>dispatch-2</guid>
-      <title>Deterministic conflict resolution</title>
-      <link>https://example.com/dispatch/conflicts</link>
-      <description><![CDATA[<p>Server acceptance order keeps sync predictable.</p>]]></description>
-      <pubDate>Thu, 11 Jul 2024 08:15:00 GMT</pubDate>
-    </item>
-  </channel>
-</rss>
-''';
-
-const String _demoAtom = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom">
-  <title>SynkFeed Lab Notes</title>
-  <subtitle>Small implementation notes</subtitle>
-  <link href="https://example.com/lab/" rel="alternate" />
-  <entry>
-    <id>tag:example.com,2024:article-atom-1</id>
-    <title>Why local-first matters</title>
-    <link href="https://example.com/lab/local-first" rel="alternate" />
-    <summary><![CDATA[<p>The interface must never wait for the server.</p>]]></summary>
-    <updated>2024-07-10T12:34:56Z</updated>
-  </entry>
-</feed>
-''';

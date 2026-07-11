@@ -25,9 +25,9 @@ class ArticleState {
     String? userId,
     String? articleId,
     bool? isRead,
-    DateTime? readAt,
+    Object? readAt = _unset,
     bool? isStarred,
-    DateTime? starredAt,
+    Object? starredAt = _unset,
     bool? isArchived,
     DateTime? updatedAt,
     int? logicalVersion,
@@ -36,9 +36,11 @@ class ArticleState {
       userId: userId ?? this.userId,
       articleId: articleId ?? this.articleId,
       isRead: isRead ?? this.isRead,
-      readAt: readAt ?? this.readAt,
+      readAt: identical(readAt, _unset) ? this.readAt : readAt as DateTime?,
       isStarred: isStarred ?? this.isStarred,
-      starredAt: starredAt ?? this.starredAt,
+      starredAt: identical(starredAt, _unset)
+          ? this.starredAt
+          : starredAt as DateTime?,
       isArchived: isArchived ?? this.isArchived,
       updatedAt: updatedAt ?? this.updatedAt,
       logicalVersion: logicalVersion ?? this.logicalVersion,
@@ -112,3 +114,5 @@ class ArticleState {
     return DateTime.tryParse(raw)?.toUtc();
   }
 }
+
+const Object _unset = Object();

@@ -1,14 +1,23 @@
 import '../models/article.dart';
 import '../models/article_state.dart';
 import '../models/feed.dart';
+import '../models/remote_change.dart';
+import '../models/retention_policy.dart';
 import '../models/sync_operation.dart';
+import '../models/subscription.dart';
 import 'local_feed_repository.dart';
 
 class MemoryLocalFeedRepository implements LocalFeedRepository {
   final Map<String, Feed> _feeds = <String, Feed>{};
   final Map<String, Article> _articles = <String, Article>{};
   final Map<String, ArticleState> _articleStates = <String, ArticleState>{};
+  final Map<String, Subscription> _subscriptions = <String, Subscription>{};
+  final Map<String, RetentionPolicy> _retentionPolicies =
+      <String, RetentionPolicy>{};
   final List<SyncOperation> _pendingOperations = <SyncOperation>[];
+  final List<SyncOperation> _rejectedOperations = <SyncOperation>[];
+  final Map<String, int> _clientSequences = <String, int>{};
+  final Map<String, int> _syncCursors = <String, int>{};
 
   @override
   Future<void> upsertFeed(Feed feed) async {
@@ -30,11 +39,114 @@ class MemoryLocalFeedRepository implements LocalFeedRepository {
   }
 
   @override
+  Future<void> upsertSubscription(Subscription subscription) async {
+    _subscriptions[subscription.id] = subscription;
+  }
+
+  @override
+  Future<List<Subscription>> listSubscriptions({required String userId}) async {
+    final items =
+        _subscriptions.values
+            .where(
+              (subscription) =>
+                  subscription.userId == userId &&
+                  subscription.deletedAt == null,
+            )
+            .toList(growable: false)
+          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return items;
+  }
+
+  @override
+  Future<void> deleteSubscription({
+    required String subscriptionId,
+    required DateTime deletedAt,
+  }) async {
+    final current = _subscriptions[subscriptionId];
+    if (current != null) {
+      _subscriptions[subscriptionId] = current.copyWith(
+        deletedAt: deletedAt,
+        updatedAt: deletedAt,
+        syncVersion: current.syncVersion + 1,
+      );
+    }
+  }
+
+  @override
+  Future<RetentionPolicy> getRetentionPolicy(String userId) async {
+    return _retentionPolicies[userId] ?? const RetentionPolicy();
+  }
+
+  @override
+  Future<void> saveRetentionPolicy(
+    String userId,
+    RetentionPolicy policy,
+  ) async {
+    _retentionPolicies[userId] = policy;
+  }
+
+  @override
+  Future<int> cleanUpArticles({
+    required String userId,
+    required DateTime now,
+  }) async {
+    final policy = await getRetentionPolicy(userId);
+    final candidates = <String>{};
+    if (policy.retentionDays != null) {
+      final cutoff = now.toUtc().subtract(
+        Duration(days: policy.retentionDays!),
+      );
+      for (final article in _articles.values) {
+        if ((article.publishedAt ?? article.insertedAt).isBefore(cutoff) &&
+            _canRemove(article.id, userId, policy)) {
+          candidates.add(article.id);
+        }
+      }
+    }
+    final maximum = policy.maximumArticlesPerFeed;
+    if (maximum != null) {
+      for (final feed in _feeds.values) {
+        final articles =
+            _articles.values
+                .where((article) => article.feedId == feed.id)
+                .toList()
+              ..sort(
+                (a, b) => (b.publishedAt ?? b.insertedAt).compareTo(
+                  a.publishedAt ?? a.insertedAt,
+                ),
+              );
+        for (final article in articles.skip(maximum)) {
+          if (_canRemove(article.id, userId, policy)) {
+            candidates.add(article.id);
+          }
+        }
+      }
+    }
+    for (final articleId in candidates) {
+      _articles.remove(articleId);
+      _articleStates.removeWhere((key, value) => value.articleId == articleId);
+    }
+    return candidates.length;
+  }
+
+  bool _canRemove(String articleId, String userId, RetentionPolicy policy) {
+    final state = _articleStates[_stateKey(userId, articleId)];
+    if (policy.preserveUnread && state?.isRead != true) {
+      return false;
+    }
+    if (policy.preserveStarred && state?.isStarred == true) {
+      return false;
+    }
+    return true;
+  }
+
+  @override
   Future<List<Article>> listArticles({
     required String userId,
     String? feedId,
     bool unreadOnly = false,
     bool starredOnly = false,
+    String? searchQuery,
   }) async {
     final filtered = _articles.values
         .where((article) {
@@ -47,6 +159,12 @@ class MemoryLocalFeedRepository implements LocalFeedRepository {
             return false;
           }
           if (starredOnly && state?.isStarred != true) {
+            return false;
+          }
+          final normalizedQuery = searchQuery?.trim().toLowerCase();
+          if (normalizedQuery != null &&
+              normalizedQuery.isNotEmpty &&
+              !article.title.toLowerCase().contains(normalizedQuery)) {
             return false;
           }
           return true;
@@ -80,6 +198,13 @@ class MemoryLocalFeedRepository implements LocalFeedRepository {
   Future<ArticleState> upsertArticleState(ArticleState state) async {
     _articleStates[_stateKey(state.userId, state.articleId)] = state;
     return state;
+  }
+
+  @override
+  Future<int> nextClientSequence(String deviceId) async {
+    final next = (_clientSequences[deviceId] ?? 0) + 1;
+    _clientSequences[deviceId] = next;
+    return next;
   }
 
   @override
@@ -135,6 +260,64 @@ class MemoryLocalFeedRepository implements LocalFeedRepository {
       (operation) => operation.operationId == operationId,
     );
   }
+
+  @override
+  Future<void> markOperationRejected(String operationId, String errorCode) async {
+    final index = _pendingOperations.indexWhere(
+      (operation) => operation.operationId == operationId,
+    );
+    if (index == -1) {
+      return;
+    }
+    _rejectedOperations.add(
+      _pendingOperations.removeAt(index).copyWith(
+        status: 'rejected',
+        errorCode: errorCode,
+      ),
+    );
+  }
+
+  @override
+  Future<List<SyncOperation>> reassignPendingOperations({
+    required String deviceId,
+  }) async {
+    for (var index = 0; index < _pendingOperations.length; index += 1) {
+      final operation = _pendingOperations[index];
+      if (operation.deviceId == deviceId) {
+        continue;
+      }
+      final sequence = await nextClientSequence(deviceId);
+      _pendingOperations[index] = operation.copyWith(
+        operationId:
+            '$deviceId:${operation.entityId}:$sequence:${operation.operationType}',
+        deviceId: deviceId,
+        clientSequence: sequence,
+      );
+    }
+    return listPendingOperations();
+  }
+
+  @override
+  Future<int> getSyncCursor(String userId) async => _syncCursors[userId] ?? 0;
+
+  @override
+  Future<void> applyRemoteChanges({
+    required String userId,
+    required List<RemoteChange> changes,
+    required int nextCursor,
+  }) async {
+    for (final change in changes) {
+      final state = change.toArticleState(userId);
+      if (state == null || !_articles.containsKey(state.articleId)) {
+        continue;
+      }
+      _articleStates[_stateKey(userId, state.articleId)] = state;
+    }
+    _syncCursors[userId] = nextCursor;
+  }
+
+  @override
+  Future<void> close() async {}
 
   Future<SyncOperation?> _writeState({
     required String userId,

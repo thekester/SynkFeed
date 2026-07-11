@@ -27,5 +27,11 @@ void main() {
     expect(starred.isStarred, isTrue);
     expect(starred.starredAt, DateTime.utc(2026, 7, 11, 12, 2, 0));
     expect(starred.logicalVersion, 9);
+
+    final cleared = starred
+        .markRead(false, at: DateTime.utc(2026, 7, 11, 12, 3))
+        .markStarred(false, at: DateTime.utc(2026, 7, 11, 12, 4));
+    expect(cleared.readAt, isNull);
+    expect(cleared.starredAt, isNull);
   });
 }

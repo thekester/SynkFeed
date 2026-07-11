@@ -15,14 +15,32 @@ Open-source, offline-first RSS reader for Android, Windows, and Linux, with seam
 
 ## Current Layout
 
-- `packages/synkfeed_core`: Dart core package with models, RSS parsing, a local repository abstraction, and unit tests.
-- `apps/reader`: Flutter shell built on top of the core package.
+- `packages/synkfeed_core`: Dart core package with models, RSS/Atom downloading and parsing, SQLite persistence, a local repository abstraction, and unit tests.
+- `apps/reader`: Flutter reader shell backed by a persistent offline library.
+- `server`: Fastify API, PostgreSQL migrations, authentication, synchronization, and RSS collector.
 - `docs/decisions`: architecture notes and ADRs.
 
 ## Local Checks
 
 - The core package can be tested with the Dart SDK: `cd packages/synkfeed_core && dart test`.
-- The Flutter app shell is scaffolded for later validation once the Flutter SDK is installed.
+- The Flutter app can be checked with `cd apps/reader && flutter analyze && flutter test`.
+- The server can be checked with `cd server && npm ci && npm run typecheck && npm test`.
+
+## Current Reader Flow
+
+- Add an HTTP(S) RSS or Atom URL from the app.
+- SynkFeed downloads and parses the feed with response-size and timeout limits.
+- Feeds, articles, read/favorite states, and pending sync operations are stored in
+  the local SQLite database.
+- Refreshes use `ETag` and `Last-Modified` when publishers provide them.
+- Article state changes update locally and enter the persistent operation queue in
+  one SQLite transaction.
+
+## Self-hosting
+
+Copy `.env.example` to `.env`, replace the example secrets, then run
+`docker compose up --build -d`. See [the self-hosting guide](docs/self-hosting.md)
+for HTTPS and backup guidance.
 
 ## GitHub Actions
 

@@ -4,9 +4,13 @@ build/
 .idea/
 .vscode/
 coverage/
+node_modules/
+dist/
+.env
 **/.dart_tool/
 **/.packages
 **/build/
+.flutter-plugins-dependencies
 **/*.g.dart
 **/*.freezed.dart
 **/*.mocks.dart
