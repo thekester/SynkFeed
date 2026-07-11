@@ -9,6 +9,7 @@ import '../../app/open_link_io.dart'
     if (dart.library.js_interop) '../../app/open_link_web.dart';
 import '../../app/reader_demo_controller.dart';
 import '../../app/sync_account_controller.dart';
+import '../../app/theme_controller.dart';
 import 'article_html_view.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -16,15 +17,21 @@ class HomeScreen extends StatelessWidget {
     super.key,
     required this.controller,
     required this.syncController,
+    required this.themeController,
   });
 
   final ReaderDemoController controller;
   final SyncAccountController syncController;
+  final ThemeController themeController;
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: Listenable.merge([controller, syncController]),
+      animation: Listenable.merge([
+        controller,
+        syncController,
+        themeController,
+      ]),
       builder: (context, _) {
         return LayoutBuilder(
           builder: (context, constraints) {
@@ -42,6 +49,7 @@ class HomeScreen extends StatelessWidget {
               controller: controller,
               syncController: syncController,
             );
+            final themeButton = _ThemeButton(themeController: themeController);
             final actions = isWide
                 ? <Widget>[
                     IconButton(
@@ -51,6 +59,7 @@ class HomeScreen extends StatelessWidget {
                           : () => _refreshSelectedFeed(context, controller),
                       icon: const Icon(Icons.refresh_rounded),
                     ),
+                    themeButton,
                     syncButton,
                     FilledButton.tonalIcon(
                       onPressed: controller.isImporting
@@ -73,6 +82,7 @@ class HomeScreen extends StatelessWidget {
                           : () => _refreshSelectedFeed(context, controller),
                       icon: const Icon(Icons.refresh_rounded),
                     ),
+                    themeButton,
                     syncButton,
                     IconButton(
                       tooltip: 'Add feed',
@@ -89,14 +99,19 @@ class HomeScreen extends StatelessWidget {
                   ];
 
             final colorScheme = Theme.of(context).colorScheme;
+            // In light mode the panels read best as white cards on a soft
+            // gray canvas; in dark mode the canvas is the darkest surface.
+            final canvasColor = colorScheme.brightness == Brightness.light
+                ? colorScheme.surfaceContainerLow
+                : colorScheme.surfaceContainerLowest;
             final busy =
                 controller.isImporting ||
                 controller.isDemoLoading ||
                 syncController.isBusy;
             return Scaffold(
-              backgroundColor: colorScheme.surfaceContainerLowest,
+              backgroundColor: canvasColor,
               appBar: AppBar(
-                backgroundColor: colorScheme.surfaceContainerLowest,
+                backgroundColor: canvasColor,
                 scrolledUnderElevation: 0,
                 titleSpacing: 16,
                 title: Row(
@@ -223,6 +238,26 @@ class _LibraryMenu extends StatelessWidget {
         PopupMenuItem(value: 'storage', child: Text('Offline storage')),
         PopupMenuItem(value: 'account', child: Text('Account & sync')),
       ],
+    );
+  }
+}
+
+class _ThemeButton extends StatelessWidget {
+  const _ThemeButton({required this.themeController});
+
+  final ThemeController themeController;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, label) = switch (themeController.mode) {
+      ThemeMode.system => (Icons.brightness_auto_rounded, 'system'),
+      ThemeMode.light => (Icons.light_mode_rounded, 'light'),
+      ThemeMode.dark => (Icons.dark_mode_rounded, 'dark'),
+    };
+    return IconButton(
+      tooltip: 'Theme: $label (tap to change)',
+      onPressed: themeController.cycle,
+      icon: Icon(icon),
     );
   }
 }
@@ -428,9 +463,12 @@ class _PanelCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final panelColor = colorScheme.brightness == Brightness.light
+        ? colorScheme.surface
+        : colorScheme.surfaceContainerLow;
     return Container(
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
+        color: panelColor,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: colorScheme.outlineVariant.withValues(alpha: 0.5),
@@ -694,7 +732,7 @@ class _ArticleList extends StatelessWidget {
                     onPressed: () => controller.setSearchQuery(''),
                     icon: const Icon(Icons.close_rounded),
                   ),
-            border: const OutlineInputBorder(),
+            isDense: true,
           ),
           onFieldSubmitted: controller.setSearchQuery,
         ),
