@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:synkfeed_core/synkfeed_core.dart';
 
+import 'platform_session_store_io.dart'
+    if (dart.library.js_interop) 'platform_session_store_web.dart';
 import 'reader_demo_controller.dart';
 import 'sync_account_controller.dart';
 import '../features/home/home_screen.dart';
@@ -33,7 +36,12 @@ class _SynkFeedAppState extends State<SynkFeedApp> {
   Future<void> _initialize() async {
     LocalFeedRepository repository;
     SessionStore sessionStore;
-    if (widget.repository != null) {
+    if (kIsWeb) {
+      // The browser build keeps articles in memory and repopulates them from
+      // the sync server; only the session survives a page refresh.
+      repository = widget.repository ?? MemoryLocalFeedRepository();
+      sessionStore = widget.sessionStore ?? createWebSessionStore();
+    } else if (widget.repository != null) {
       repository = widget.repository!;
       sessionStore = widget.sessionStore ?? MemorySessionStore();
     } else {

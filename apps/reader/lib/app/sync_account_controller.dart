@@ -204,11 +204,18 @@ class SyncAccountController extends ChangeNotifier {
   }
 
   String get _deviceName {
+    if (kIsWeb) {
+      return 'Web browser';
+    }
     final host = Platform.localHostname.trim();
     return host.isEmpty ? 'SynkFeed device' : host;
   }
 
   String get _platform {
+    if (kIsWeb) {
+      // The server only knows the shipped device platforms.
+      return 'linux';
+    }
     if (Platform.isAndroid) {
       return 'android';
     }

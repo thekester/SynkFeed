@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+
+import 'package:http/http.dart' as http;
 
 import '../models/remote_change.dart';
 import '../models/sync_operation.dart';
@@ -48,18 +49,21 @@ class SyncPullPage {
 }
 
 /// HTTP transport for the SynkFeed server API.
+///
+/// Built on `package:http` so the same client runs on the Dart VM and in the
+/// browser (the reader's web build talks to the API from the same origin).
 class SyncApiClient {
   SyncApiClient({
     required this.serverUrl,
     this.timeout = const Duration(seconds: 20),
     this.maximumResponseBytes = 5 * 1024 * 1024,
-    HttpClient? httpClient,
-  }) : _client = httpClient ?? HttpClient();
+    http.Client? httpClient,
+  }) : _client = httpClient ?? http.Client();
 
   final Uri serverUrl;
   final Duration timeout;
   final int maximumResponseBytes;
-  final HttpClient _client;
+  final http.Client _client;
 
   Future<AuthSession> register({
     required String email,
@@ -168,7 +172,7 @@ class SyncApiClient {
   }
 
   void close() {
-    _client.close(force: true);
+    _client.close();
   }
 
   Future<AuthSession> _authenticate(
@@ -211,19 +215,16 @@ class SyncApiClient {
     if (query != null) {
       url = url.replace(queryParameters: query);
     }
-    final request = await _client.openUrl(method, url).timeout(timeout);
-    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+    final request = http.Request(method, url);
+    request.headers['accept'] = 'application/json';
     if (accessToken != null) {
-      request.headers.set(
-        HttpHeaders.authorizationHeader,
-        'Bearer $accessToken',
-      );
+      request.headers['authorization'] = 'Bearer $accessToken';
     }
     if (body != null) {
-      request.headers.contentType = ContentType.json;
-      request.add(utf8.encode(jsonEncode(body)));
+      request.headers['content-type'] = 'application/json; charset=utf-8';
+      request.bodyBytes = utf8.encode(jsonEncode(body));
     }
-    final response = await request.close().timeout(timeout);
+    final response = await _client.send(request).timeout(timeout);
     final decoded = await _decodeBody(response);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw SyncApiException(
@@ -234,9 +235,11 @@ class SyncApiClient {
     return decoded;
   }
 
-  Future<Map<String, Object?>> _decodeBody(HttpClientResponse response) async {
+  Future<Map<String, Object?>> _decodeBody(
+    http.StreamedResponse response,
+  ) async {
     final bytes = <int>[];
-    await for (final chunk in response.timeout(timeout)) {
+    await for (final chunk in response.stream.timeout(timeout)) {
       bytes.addAll(chunk);
       if (bytes.length > maximumResponseBytes) {
         throw const FormatException('Server response is too large.');

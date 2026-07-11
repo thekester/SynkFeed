@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+
+import 'package:http/http.dart' as http;
 
 /// Google Reader stream and tag identifiers used by FreshRSS.
 class GReaderStreams {
@@ -98,14 +99,14 @@ class GReaderApiClient {
     required Uri serverUrl,
     this.timeout = const Duration(seconds: 30),
     this.maximumResponseBytes = 20 * 1024 * 1024,
-    HttpClient? httpClient,
+    http.Client? httpClient,
   }) : serverUrl = _apiRoot(serverUrl),
-       _client = httpClient ?? HttpClient();
+       _client = httpClient ?? http.Client();
 
   final Uri serverUrl;
   final Duration timeout;
   final int maximumResponseBytes;
-  final HttpClient _client;
+  final http.Client _client;
 
   /// Exchanges the account email and API password for a long-lived
   /// `GoogleLogin` auth token.
@@ -258,7 +259,7 @@ class GReaderApiClient {
   }
 
   void close() {
-    _client.close(force: true);
+    _client.close();
   }
 
   Future<Map<String, Object?>> _requestJson(
@@ -294,12 +295,9 @@ class GReaderApiClient {
     if (query != null) {
       url = url.replace(queryParameters: query);
     }
-    final request = await _client.openUrl(method, url).timeout(timeout);
+    final request = http.Request(method, url);
     if (authToken != null) {
-      request.headers.set(
-        HttpHeaders.authorizationHeader,
-        'GoogleLogin auth=$authToken',
-      );
+      request.headers['authorization'] = 'GoogleLogin auth=$authToken';
     }
     final encodedForm =
         rawForm ??
@@ -310,16 +308,13 @@ class GReaderApiClient {
             )
             .join('&');
     if (encodedForm != null) {
-      request.headers.contentType = ContentType(
-        'application',
-        'x-www-form-urlencoded',
-        charset: 'utf-8',
-      );
-      request.add(utf8.encode(encodedForm));
+      request.headers['content-type'] =
+          'application/x-www-form-urlencoded; charset=utf-8';
+      request.bodyBytes = utf8.encode(encodedForm);
     }
-    final response = await request.close().timeout(timeout);
+    final response = await _client.send(request).timeout(timeout);
     final bytes = <int>[];
-    await for (final chunk in response.timeout(timeout)) {
+    await for (final chunk in response.stream.timeout(timeout)) {
       bytes.addAll(chunk);
       if (bytes.length > maximumResponseBytes) {
         throw const FormatException('Server response is too large.');

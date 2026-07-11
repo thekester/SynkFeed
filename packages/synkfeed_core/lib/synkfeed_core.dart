@@ -8,7 +8,8 @@ export 'src/models/subscription.dart';
 export 'src/opml/opml_document.dart';
 export 'src/repository/local_feed_repository.dart';
 export 'src/repository/memory_local_feed_repository.dart';
-export 'src/repository/sqlite_local_feed_repository.dart';
+export 'src/repository/sqlite_local_feed_repository_stub.dart'
+    if (dart.library.ffi) 'src/repository/sqlite_local_feed_repository.dart';
 export 'src/rss/feed_importer.dart';
 export 'src/rss/parsed_article.dart';
 export 'src/rss/parsed_feed.dart';
