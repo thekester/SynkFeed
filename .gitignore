@@ -11,3 +11,4 @@ coverage/
 **/*.freezed.dart
 **/*.mocks.dart
 packages/synkfeed_core/pubspec.lock
+apps/reader/pubspec.lock
