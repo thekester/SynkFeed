@@ -67,7 +67,13 @@ class SyncApiClient {
     required String deviceName,
     required String platform,
   }) {
-    return _authenticate('/v1/auth/register', email, password, deviceName, platform);
+    return _authenticate(
+      '/v1/auth/register',
+      email,
+      password,
+      deviceName,
+      platform,
+    );
   }
 
   Future<AuthSession> login({
@@ -76,7 +82,13 @@ class SyncApiClient {
     required String deviceName,
     required String platform,
   }) {
-    return _authenticate('/v1/auth/login', email, password, deviceName, platform);
+    return _authenticate(
+      '/v1/auth/login',
+      email,
+      password,
+      deviceName,
+      platform,
+    );
   }
 
   /// Exchanges the session refresh token for a rotated token pair.
@@ -202,7 +214,10 @@ class SyncApiClient {
     final request = await _client.openUrl(method, url).timeout(timeout);
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     if (accessToken != null) {
-      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer $accessToken',
+      );
     }
     if (body != null) {
       request.headers.contentType = ContentType.json;

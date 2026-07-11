@@ -118,7 +118,11 @@ void main() {
   });
 
   test('pull decodes change pages with cursor and hasMore', () async {
-    final page = await client.pull(accessToken: 'access-1', cursor: 5, limit: 2);
+    final page = await client.pull(
+      accessToken: 'access-1',
+      cursor: 5,
+      limit: 2,
+    );
 
     expect(requests.single.query, {'cursor': '5', 'limit': '2'});
     expect(page.nextCursor, 7);

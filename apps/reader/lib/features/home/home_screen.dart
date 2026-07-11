@@ -809,6 +809,7 @@ Future<void> _showAccountDialog(
     text: syncController.session?.email ?? '',
   );
   final passwordController = TextEditingController();
+  var backend = syncController.session?.backend ?? SyncBackend.synkfeed;
 
   Future<void> submit(BuildContext dialogContext, bool createAccount) async {
     try {
@@ -817,6 +818,7 @@ Future<void> _showAccountDialog(
         email: emailController.text,
         password: passwordController.text,
         createAccount: createAccount,
+        backend: backend,
       );
       passwordController.clear();
       if (dialogContext.mounted) {
@@ -837,119 +839,150 @@ Future<void> _showAccountDialog(
 
   await showDialog<void>(
     context: context,
-    builder: (dialogContext) => AnimatedBuilder(
-      animation: syncController,
-      builder: (context, _) {
-        final session = syncController.session;
-        final busy = syncController.isBusy;
-        if (session != null) {
-          final report = syncController.lastReport;
-          final syncedAt = syncController.lastSyncAt;
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setState) => AnimatedBuilder(
+        animation: syncController,
+        builder: (context, _) {
+          final session = syncController.session;
+          final busy = syncController.isBusy;
+          if (session != null) {
+            final report = syncController.lastReport;
+            final syncedAt = syncController.lastSyncAt;
+            return AlertDialog(
+              title: const Text('Account & sync'),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.cloud_done_rounded),
+                      title: Text(session.email ?? 'Signed in'),
+                      subtitle: Text(
+                        '${session.backend == SyncBackend.greader ? 'FreshRSS - ' : ''}'
+                        '${session.serverUrl}',
+                      ),
+                    ),
+                    if (report != null && syncedAt != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          'Last sync ${syncedAt.toLocal()}: '
+                          '${report.pushedOperations} sent, '
+                          '${report.appliedChanges} received'
+                          '${report.rejectedOperations == 0 ? '' : ', ${report.rejectedOperations} rejected'}.',
+                        ),
+                      ),
+                    if (syncController.lastError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          syncController.lastError!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: busy ? null : syncController.signOut,
+                  child: const Text('Sign out'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Close'),
+                ),
+                FilledButton.icon(
+                  onPressed: busy
+                      ? null
+                      : () => _syncNow(context, controller, syncController),
+                  icon: const Icon(Icons.cloud_sync_rounded),
+                  label: const Text('Sync now'),
+                ),
+              ],
+            );
+          }
+          final isGReader = backend == SyncBackend.greader;
           return AlertDialog(
-            title: const Text('Account & sync'),
+            title: const Text('Connect to a sync server'),
             content: SizedBox(
               width: 420,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.cloud_done_rounded),
-                    title: Text(session.email ?? 'Signed in'),
-                    subtitle: Text(session.serverUrl.toString()),
+                  SegmentedButton<SyncBackend>(
+                    segments: const [
+                      ButtonSegment(
+                        value: SyncBackend.synkfeed,
+                        label: Text('SynkFeed'),
+                        icon: Icon(Icons.dns_rounded),
+                      ),
+                      ButtonSegment(
+                        value: SyncBackend.greader,
+                        label: Text('FreshRSS'),
+                        icon: Icon(Icons.rss_feed_rounded),
+                      ),
+                    ],
+                    selected: {backend},
+                    onSelectionChanged: (selection) =>
+                        setState(() => backend = selection.single),
                   ),
-                  if (report != null && syncedAt != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        'Last sync ${syncedAt.toLocal()}: '
-                        '${report.pushedOperations} sent, '
-                        '${report.appliedChanges} received'
-                        '${report.rejectedOperations == 0 ? '' : ', ${report.rejectedOperations} rejected'}.',
-                      ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: serverController,
+                    keyboardType: TextInputType.url,
+                    decoration: InputDecoration(
+                      labelText: 'Server URL',
+                      hintText: isGReader
+                          ? 'https://rss.example.com'
+                          : 'https://synkfeed.example.com',
                     ),
-                  if (syncController.lastError != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        syncController.lastError!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: InputDecoration(
+                      labelText: isGReader ? 'Username or email' : 'Email',
                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: true,
+                    decoration: InputDecoration(
+                      labelText: isGReader ? 'API password' : 'Password',
+                      helperText: isGReader
+                          ? 'FreshRSS: Settings > Profile > API management'
+                          : 'At least 12 characters',
+                    ),
+                  ),
                 ],
               ),
             ),
             actions: [
               TextButton(
-                onPressed: busy ? null : syncController.signOut,
-                child: const Text('Sign out'),
-              ),
-              TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('Close'),
+                child: const Text('Cancel'),
               ),
-              FilledButton.icon(
-                onPressed: busy
-                    ? null
-                    : () => _syncNow(context, controller, syncController),
-                icon: const Icon(Icons.cloud_sync_rounded),
-                label: const Text('Sync now'),
+              if (!isGReader)
+                OutlinedButton(
+                  onPressed: busy ? null : () => submit(dialogContext, true),
+                  child: const Text('Create account'),
+                ),
+              FilledButton(
+                onPressed: busy ? null : () => submit(dialogContext, false),
+                child: const Text('Sign in'),
               ),
             ],
           );
-        }
-        return AlertDialog(
-          title: const Text('Connect to a sync server'),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: serverController,
-                  keyboardType: TextInputType.url,
-                  decoration: const InputDecoration(
-                    labelText: 'Server URL',
-                    hintText: 'https://synkfeed.example.com',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(labelText: 'Email'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: passwordController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Password',
-                    helperText: 'At least 12 characters',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
-            ),
-            OutlinedButton(
-              onPressed: busy ? null : () => submit(dialogContext, true),
-              child: const Text('Create account'),
-            ),
-            FilledButton(
-              onPressed: busy ? null : () => submit(dialogContext, false),
-              child: const Text('Sign in'),
-            ),
-          ],
-        );
-      },
+        },
+      ),
     ),
   );
 

@@ -156,10 +156,8 @@ void main() {
     client.failNextPullWith(
       const SyncApiException(statusCode: 401, code: 'invalid_token'),
     );
-    client.refreshResult = (current) => current.copyWith(
-      accessToken: 'access-2',
-      refreshToken: 'refresh-2',
-    );
+    client.refreshResult = (current) =>
+        current.copyWith(accessToken: 'access-2', refreshToken: 'refresh-2');
     client.pullPages.add(
       const SyncPullPage(changes: [], nextCursor: 0, hasMore: false),
     );
@@ -227,8 +225,7 @@ void main() {
   });
 }
 
-typedef _PushHandler =
-    SyncPushResult Function(List<SyncOperation> operations);
+typedef _PushHandler = SyncPushResult Function(List<SyncOperation> operations);
 
 class _FakeSyncApiClient implements SyncApiClient {
   final List<_PushHandler> pushResults = <_PushHandler>[];
@@ -321,7 +318,11 @@ class _FakeSyncApiClient implements SyncApiClient {
       throw error;
     }
     if (pullPages.isEmpty) {
-      return SyncPullPage(changes: const [], nextCursor: cursor, hasMore: false);
+      return SyncPullPage(
+        changes: const [],
+        nextCursor: cursor,
+        hasMore: false,
+      );
     }
     return pullPages.removeAt(0);
   }

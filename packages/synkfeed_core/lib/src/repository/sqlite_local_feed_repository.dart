@@ -409,7 +409,10 @@ class SqliteLocalFeedRepository implements LocalFeedRepository {
   }
 
   @override
-  Future<void> markOperationRejected(String operationId, String errorCode) async {
+  Future<void> markOperationRejected(
+    String operationId,
+    String errorCode,
+  ) async {
     _database.execute(
       '''
       UPDATE sync_operations

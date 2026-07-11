@@ -1,7 +1,16 @@
 import 'dart:convert';
 import 'dart:io';
 
-/// Credentials for one authenticated device on a SynkFeed server.
+/// Which kind of server the session talks to.
+enum SyncBackend {
+  /// The native SynkFeed Fastify server.
+  synkfeed,
+
+  /// A Google Reader-compatible API, such as FreshRSS (`api/greader.php`).
+  greader,
+}
+
+/// Credentials for one authenticated device on a synchronization server.
 class AuthSession {
   const AuthSession({
     required this.serverUrl,
@@ -9,6 +18,7 @@ class AuthSession {
     required this.refreshToken,
     required this.deviceId,
     this.email,
+    this.backend = SyncBackend.synkfeed,
   });
 
   final Uri serverUrl;
@@ -16,6 +26,7 @@ class AuthSession {
   final String refreshToken;
   final String deviceId;
   final String? email;
+  final SyncBackend backend;
 
   AuthSession copyWith({
     Uri? serverUrl,
@@ -23,6 +34,7 @@ class AuthSession {
     String? refreshToken,
     String? deviceId,
     String? email,
+    SyncBackend? backend,
   }) {
     return AuthSession(
       serverUrl: serverUrl ?? this.serverUrl,
@@ -30,6 +42,7 @@ class AuthSession {
       refreshToken: refreshToken ?? this.refreshToken,
       deviceId: deviceId ?? this.deviceId,
       email: email ?? this.email,
+      backend: backend ?? this.backend,
     );
   }
 
@@ -40,6 +53,7 @@ class AuthSession {
       'refresh_token': refreshToken,
       'device_id': deviceId,
       'email': email,
+      'backend': backend.name,
     };
   }
 
@@ -50,6 +64,9 @@ class AuthSession {
       refreshToken: json['refresh_token'] as String,
       deviceId: json['device_id'] as String,
       email: json['email'] as String?,
+      backend:
+          SyncBackend.values.asNameMap()[json['backend']] ??
+          SyncBackend.synkfeed,
     );
   }
 }

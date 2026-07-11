@@ -14,5 +14,7 @@ export 'src/rss/parsed_article.dart';
 export 'src/rss/parsed_feed.dart';
 export 'src/rss/rss_parser.dart';
 export 'src/sync/auth_session.dart';
+export 'src/sync/greader_api_client.dart';
+export 'src/sync/greader_sync_engine.dart';
 export 'src/sync/sync_api_client.dart';
 export 'src/sync/sync_engine.dart';

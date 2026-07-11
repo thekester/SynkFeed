@@ -184,10 +184,7 @@ void main() {
       );
       expect(rebound.map((op) => op.deviceId).toSet(), {'device-uuid'});
       expect(rebound.map((op) => op.clientSequence).toList(), [1, 2]);
-      expect(
-        rebound.first.operationId,
-        'device-uuid:article-1:1:mark_read',
-      );
+      expect(rebound.first.operationId, 'device-uuid:article-1:1:mark_read');
       // A second pass leaves already-bound operations untouched.
       final unchanged = await repository.reassignPendingOperations(
         deviceId: 'device-uuid',

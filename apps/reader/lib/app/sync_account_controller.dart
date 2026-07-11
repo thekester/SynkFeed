@@ -10,12 +10,18 @@ class SyncAccountController extends ChangeNotifier {
     required this.repository,
     required this.sessionStore,
     SyncApiClient Function(Uri serverUrl)? clientFactory,
+    GReaderApiClient Function(Uri serverUrl)? greaderClientFactory,
   }) : _clientFactory =
-           clientFactory ?? ((serverUrl) => SyncApiClient(serverUrl: serverUrl));
+           clientFactory ??
+           ((serverUrl) => SyncApiClient(serverUrl: serverUrl)),
+       _greaderClientFactory =
+           greaderClientFactory ??
+           ((serverUrl) => GReaderApiClient(serverUrl: serverUrl));
 
   final LocalFeedRepository repository;
   final SessionStore sessionStore;
   final SyncApiClient Function(Uri serverUrl) _clientFactory;
+  final GReaderApiClient Function(Uri serverUrl) _greaderClientFactory;
 
   AuthSession? _session;
   bool _isBusy = false;
@@ -40,6 +46,7 @@ class SyncAccountController extends ChangeNotifier {
     required String email,
     required String password,
     required bool createAccount,
+    SyncBackend backend = SyncBackend.synkfeed,
   }) async {
     final uri = Uri.tryParse(serverUrl.trim());
     if (uri == null ||
@@ -49,21 +56,10 @@ class SyncAccountController extends ChangeNotifier {
       throw const FormatException('Please provide a valid HTTP(S) server URL.');
     }
     _setBusy(true);
-    final client = _clientFactory(uri);
     try {
-      final session = createAccount
-          ? await client.register(
-              email: email.trim(),
-              password: password,
-              deviceName: _deviceName,
-              platform: _platform,
-            )
-          : await client.login(
-              email: email.trim(),
-              password: password,
-              deviceName: _deviceName,
-              platform: _platform,
-            );
+      final session = backend == SyncBackend.greader
+          ? await _signInGReader(uri, email.trim(), password)
+          : await _signInSynkFeed(uri, email.trim(), password, createAccount);
       await sessionStore.save(session);
       _session = session;
       _lastError = null;
@@ -71,8 +67,57 @@ class SyncAccountController extends ChangeNotifier {
       _lastError = describeError(error);
       rethrow;
     } finally {
-      client.close();
       _setBusy(false);
+    }
+  }
+
+  Future<AuthSession> _signInSynkFeed(
+    Uri uri,
+    String email,
+    String password,
+    bool createAccount,
+  ) async {
+    final client = _clientFactory(uri);
+    try {
+      return createAccount
+          ? await client.register(
+              email: email,
+              password: password,
+              deviceName: _deviceName,
+              platform: _platform,
+            )
+          : await client.login(
+              email: email,
+              password: password,
+              deviceName: _deviceName,
+              platform: _platform,
+            );
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<AuthSession> _signInGReader(
+    Uri uri,
+    String email,
+    String password,
+  ) async {
+    final client = _greaderClientFactory(uri);
+    try {
+      final authToken = await client.clientLogin(
+        email: email,
+        password: password,
+      );
+      return AuthSession(
+        serverUrl: uri,
+        accessToken: authToken,
+        refreshToken: '',
+        deviceId: 'greader',
+        email: email,
+        backend: SyncBackend.greader,
+      );
+    } finally {
+      client.close();
     }
   }
 
@@ -82,14 +127,23 @@ class SyncAccountController extends ChangeNotifier {
       return null;
     }
     _setBusy(true);
-    final client = _clientFactory(session.serverUrl);
+    final isGReader = session.backend == SyncBackend.greader;
+    final greaderClient = isGReader
+        ? _greaderClientFactory(session.serverUrl)
+        : null;
+    final client = isGReader ? null : _clientFactory(session.serverUrl);
     try {
-      final engine = SyncEngine(
-        repository: repository,
-        client: client,
-        sessionStore: sessionStore,
-      );
-      final report = await engine.synchronize();
+      final report = isGReader
+          ? await GReaderSyncEngine(
+              repository: repository,
+              client: greaderClient!,
+              sessionStore: sessionStore,
+            ).synchronize()
+          : await SyncEngine(
+              repository: repository,
+              client: client!,
+              sessionStore: sessionStore,
+            ).synchronize();
       _session = await sessionStore.load();
       _lastReport = report;
       _lastSyncAt = DateTime.now().toUtc();
@@ -101,7 +155,8 @@ class SyncAccountController extends ChangeNotifier {
       _lastError = describeError(error);
       rethrow;
     } finally {
-      client.close();
+      client?.close();
+      greaderClient?.close();
       _setBusy(false);
     }
   }
@@ -121,6 +176,14 @@ class SyncAccountController extends ChangeNotifier {
     }
     if (error is FormatException) {
       return error.message;
+    }
+    if (error is GReaderApiException) {
+      return switch (error.statusCode) {
+        401 || 403 =>
+          'FreshRSS refused the credentials. Use your API password '
+              '(Settings > Profile > API management).',
+        _ => 'The FreshRSS server replied with HTTP ${error.statusCode}.',
+      };
     }
     if (error is SyncApiException) {
       return switch (error.code) {

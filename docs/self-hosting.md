@@ -1,5 +1,14 @@
 # Self-hosting SynkFeed
 
+Two backends can serve the reader:
+
+- **FreshRSS** (recommended for multi-user family setups): the reader speaks
+  its Google Reader-compatible API, including full article content and shared
+  read/favorite state across every FreshRSS client. See
+  [`deploy/freshrss/`](../deploy/freshrss/README.md).
+- **The native SynkFeed server** (this document): the custom Fastify/PostgreSQL
+  service with per-device operation-log synchronization.
+
 ## Requirements
 
 - Docker Engine 24 or newer

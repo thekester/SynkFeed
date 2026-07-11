@@ -23,9 +23,7 @@ class RemoteChange {
       entityType: json['entityType'] as String,
       entityId: json['entityId'] as String,
       operationType: json['operationType'] as String,
-      data: data is Map
-          ? Map<String, Object?>.from(data)
-          : <String, Object?>{},
+      data: data is Map ? Map<String, Object?>.from(data) : <String, Object?>{},
     );
   }
 

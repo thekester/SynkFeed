@@ -70,10 +70,8 @@ class SyncEngine {
       SyncPushResult result;
       try {
         result = await _authorized(
-          (active) => client.push(
-            accessToken: active.accessToken,
-            operations: batch,
-          ),
+          (active) =>
+              client.push(accessToken: active.accessToken, operations: batch),
         );
       } on SyncApiException catch (error) {
         if (error.statusCode != 400) {
@@ -135,7 +133,9 @@ class SyncEngine {
     );
   }
 
-  Future<T> _authorized<T>(Future<T> Function(AuthSession session) action) async {
+  Future<T> _authorized<T>(
+    Future<T> Function(AuthSession session) action,
+  ) async {
     try {
       return await action(_session!);
     } on SyncApiException catch (error) {

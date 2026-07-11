@@ -1,0 +1,18 @@
+services:
+  freshrss:
+    image: freshrss/freshrss:latest
+    container_name: freshrss
+    restart: unless-stopped
+    ports:
+      # Bind only to localhost when a reverse proxy terminates HTTPS in front.
+      - "8081:80"
+    environment:
+      TZ: Europe/Paris
+      # Refresh all feeds twice per hour.
+      CRON_MIN: "13,43"
+    volumes:
+      - ${FRESHRSS_DATA_DIR:-./data}:/var/www/FreshRSS/data
+      - ${FRESHRSS_EXTENSIONS_DIR:-./extensions}:/var/www/FreshRSS/extensions
+    logging:
+      options:
+        max-size: 10m

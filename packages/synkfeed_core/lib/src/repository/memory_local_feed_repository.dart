@@ -262,7 +262,10 @@ class MemoryLocalFeedRepository implements LocalFeedRepository {
   }
 
   @override
-  Future<void> markOperationRejected(String operationId, String errorCode) async {
+  Future<void> markOperationRejected(
+    String operationId,
+    String errorCode,
+  ) async {
     final index = _pendingOperations.indexWhere(
       (operation) => operation.operationId == operationId,
     );
@@ -270,10 +273,9 @@ class MemoryLocalFeedRepository implements LocalFeedRepository {
       return;
     }
     _rejectedOperations.add(
-      _pendingOperations.removeAt(index).copyWith(
-        status: 'rejected',
-        errorCode: errorCode,
-      ),
+      _pendingOperations
+          .removeAt(index)
+          .copyWith(status: 'rejected', errorCode: errorCode),
     );
   }
 
