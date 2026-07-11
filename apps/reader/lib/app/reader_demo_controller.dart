@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import 'package:synkfeed_core/synkfeed_core.dart';
@@ -96,6 +98,35 @@ class ReaderDemoController extends ChangeNotifier {
 
   String titleForFeed(Feed feed) =>
       subscriptionForFeed(feed.id)?.customTitle ?? feed.title;
+
+  String feedTitleById(String feedId) {
+    for (final feed in _feeds) {
+      if (feed.id == feedId) {
+        return titleForFeed(feed);
+      }
+    }
+    return '';
+  }
+
+  int unreadCountForFeed(String feedId) {
+    var count = 0;
+    for (final article in _articles) {
+      if (article.feedId == feedId && !isRead(article.id)) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  int get totalUnreadCount {
+    var count = 0;
+    for (final article in _articles) {
+      if (!isRead(article.id)) {
+        count += 1;
+      }
+    }
+    return count;
+  }
 
   Future<void> bootstrap() async {
     if (_bootstrapped) {
@@ -304,7 +335,10 @@ class ReaderDemoController extends ChangeNotifier {
     if (articleId == null) {
       return;
     }
+    await markArticleRead(articleId, value);
+  }
 
+  Future<void> markArticleRead(String articleId, bool value) async {
     final operation = await repository.markArticleRead(
       userId: _userId,
       deviceId: _deviceId,
@@ -324,7 +358,10 @@ class ReaderDemoController extends ChangeNotifier {
     if (articleId == null) {
       return;
     }
+    await toggleStar(articleId);
+  }
 
+  Future<void> toggleStar(String articleId) async {
     final operation = await repository.toggleArticleStar(
       userId: _userId,
       deviceId: _deviceId,
@@ -348,6 +385,11 @@ class ReaderDemoController extends ChangeNotifier {
 
   void selectArticle(String articleId) {
     selectedArticleId = articleId;
+    // Opening an article marks it read, like most readers. Skipped while the
+    // unread filter is active so the list does not shift under the tap.
+    if (articleFilter != ArticleFilter.unread && !isRead(articleId)) {
+      unawaited(markArticleRead(articleId, true));
+    }
     notifyListeners();
   }
 

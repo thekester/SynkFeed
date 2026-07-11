@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:synkfeed_core/synkfeed_core.dart';
 
 import '../../app/reader_demo_controller.dart';
@@ -26,8 +27,14 @@ class HomeScreen extends StatelessWidget {
           builder: (context, constraints) {
             final isWide = constraints.maxWidth >= 1080;
             final body = isWide
-                ? _DesktopLayout(controller: controller)
-                : _MobileLayout(controller: controller);
+                ? _DesktopLayout(
+                    controller: controller,
+                    syncController: syncController,
+                  )
+                : _MobileLayout(
+                    controller: controller,
+                    syncController: syncController,
+                  );
             final syncButton = _SyncButton(
               controller: controller,
               syncController: syncController,
@@ -78,43 +85,78 @@ class HomeScreen extends StatelessWidget {
                     const SizedBox(width: 8),
                   ];
 
+            final colorScheme = Theme.of(context).colorScheme;
             return Scaffold(
+              backgroundColor: colorScheme.surfaceContainerLowest,
               appBar: AppBar(
+                backgroundColor: colorScheme.surfaceContainerLowest,
+                scrolledUnderElevation: 0,
                 title: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('SynkFeed'),
+                    const Text(
+                      'SynkFeed',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
                     Text(
-                      controller.pendingOperationCount == 0
-                          ? controller.isImporting
-                                ? 'Downloading feed for offline reading...'
-                                : 'Local data first, sync later'
-                          : '${controller.pendingOperationCount} action(s) waiting to sync',
+                      _statusLine(controller, syncController),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        color: colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ],
                 ),
                 actions: actions,
               ),
-              body: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Color(0xFFF7F4ED), Color(0xFFF1F5F9)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-                child: SafeArea(child: body),
-              ),
+              body: SafeArea(child: body),
             );
           },
         );
       },
     );
   }
+}
+
+String _statusLine(
+  ReaderDemoController controller,
+  SyncAccountController syncController,
+) {
+  if (controller.isImporting) {
+    return 'Downloading feed for offline reading...';
+  }
+  if (controller.pendingOperationCount > 0) {
+    return '${controller.pendingOperationCount} change(s) waiting to sync';
+  }
+  final session = syncController.session;
+  if (session != null) {
+    final backend = session.backend == SyncBackend.greader
+        ? 'FreshRSS'
+        : 'SynkFeed server';
+    return '$backend - ${session.email ?? session.serverUrl.host}';
+  }
+  return 'Local library - connect a server to sync';
+}
+
+String _relativeTime(DateTime? value) {
+  if (value == null) {
+    return '';
+  }
+  final difference = DateTime.now().toUtc().difference(value.toUtc());
+  if (difference.inMinutes < 1) {
+    return 'now';
+  }
+  if (difference.inHours < 1) {
+    return '${difference.inMinutes} min';
+  }
+  if (difference.inHours < 24) {
+    return '${difference.inHours} h';
+  }
+  if (difference.inDays < 7) {
+    return '${difference.inDays} d';
+  }
+  final local = value.toLocal();
+  return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
 }
 
 class _LibraryMenu extends StatelessWidget {
@@ -175,10 +217,16 @@ class _SyncButton extends StatelessWidget {
         icon: const Icon(Icons.cloud_off_rounded),
       );
     }
+    final pending = controller.pendingOperationCount;
     return IconButton(
       tooltip: 'Sync now',
       onPressed: () => _syncNow(context, controller, syncController),
-      icon: const Icon(Icons.cloud_sync_rounded),
+      icon: pending == 0
+          ? const Icon(Icons.cloud_sync_rounded)
+          : Badge.count(
+              count: pending,
+              child: const Icon(Icons.cloud_sync_rounded),
+            ),
     );
   }
 }
@@ -212,36 +260,49 @@ Future<void> _syncNow(
 }
 
 class _DesktopLayout extends StatelessWidget {
-  const _DesktopLayout({required this.controller});
+  const _DesktopLayout({
+    required this.controller,
+    required this.syncController,
+  });
 
   final ReaderDemoController controller;
+  final SyncAccountController syncController;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
       child: Row(
         children: [
           SizedBox(
-            width: 280,
+            width: 300,
             child: _PanelCard(
               title: 'Feeds',
-              child: _FeedList(controller: controller),
+              icon: Icons.rss_feed_rounded,
+              trailing: controller.totalUnreadCount == 0
+                  ? null
+                  : '${controller.totalUnreadCount} unread',
+              child: _FeedList(
+                controller: controller,
+                syncController: syncController,
+              ),
             ),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
           Expanded(
             flex: 2,
             child: _PanelCard(
               title: 'Articles',
+              icon: Icons.article_outlined,
               child: _ArticleList(controller: controller),
             ),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
           Expanded(
             flex: 3,
             child: _PanelCard(
               title: 'Reader',
+              icon: Icons.chrome_reader_mode_outlined,
               child: _ArticleReader(controller: controller),
             ),
           ),
@@ -252,9 +313,10 @@ class _DesktopLayout extends StatelessWidget {
 }
 
 class _MobileLayout extends StatelessWidget {
-  const _MobileLayout({required this.controller});
+  const _MobileLayout({required this.controller, required this.syncController});
 
   final ReaderDemoController controller;
+  final SyncAccountController syncController;
 
   @override
   Widget build(BuildContext context) {
@@ -272,9 +334,21 @@ class _MobileLayout extends StatelessWidget {
           Expanded(
             child: TabBarView(
               children: [
-                _FeedList(controller: controller),
-                _ArticleList(controller: controller),
-                _ArticleReader(controller: controller),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: _FeedList(
+                    controller: controller,
+                    syncController: syncController,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: _ArticleList(controller: controller),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: _ArticleReader(controller: controller),
+                ),
               ],
             ),
           ),
@@ -285,46 +359,121 @@ class _MobileLayout extends StatelessWidget {
 }
 
 class _PanelCard extends StatelessWidget {
-  const _PanelCard({required this.title, required this.child});
+  const _PanelCard({
+    required this.title,
+    required this.icon,
+    required this.child,
+    this.trailing,
+  });
 
   final String title;
+  final IconData icon;
+  final String? trailing;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 0,
-      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.88),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(title, style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 12),
-            Expanded(child: child),
-          ],
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.5),
         ),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 20, color: colorScheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const Spacer(),
+              if (trailing != null)
+                Text(
+                  trailing!,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Expanded(child: child),
+        ],
       ),
     );
   }
 }
 
 class _FeedList extends StatelessWidget {
-  const _FeedList({required this.controller});
+  const _FeedList({required this.controller, required this.syncController});
 
   final ReaderDemoController controller;
+  final SyncAccountController syncController;
 
   @override
   Widget build(BuildContext context) {
     final feeds = controller.feeds;
+    final colorScheme = Theme.of(context).colorScheme;
     if (feeds.isEmpty) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'No feeds yet. Add an RSS or Atom URL to build your offline library.',
-            textAlign: TextAlign.center,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.rss_feed_rounded,
+                size: 56,
+                color: colorScheme.outline,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Your library is empty',
+                style: Theme.of(context).textTheme.titleMedium,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                syncController.isSignedIn
+                    ? 'Press "Sync now" to download your subscriptions, or add a feed URL.'
+                    : 'Add an RSS/Atom URL, or connect to your server to bring your feeds here.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              if (syncController.isSignedIn)
+                FilledButton.icon(
+                  onPressed: () =>
+                      _syncNow(context, controller, syncController),
+                  icon: const Icon(Icons.cloud_sync_rounded),
+                  label: const Text('Sync now'),
+                )
+              else
+                FilledButton.icon(
+                  onPressed: () =>
+                      _showAccountDialog(context, controller, syncController),
+                  icon: const Icon(Icons.cloud_rounded),
+                  label: const Text('Connect to a server'),
+                ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: () => _showAddFeedDialog(context, controller),
+                icon: const Icon(Icons.add_link_rounded),
+                label: const Text('Add a feed URL'),
+              ),
+            ],
           ),
         ),
       );
@@ -332,47 +481,83 @@ class _FeedList extends StatelessWidget {
 
     return ListView.separated(
       itemCount: feeds.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 8),
+      separatorBuilder: (context, index) => const SizedBox(height: 6),
       itemBuilder: (context, index) {
         final feed = feeds[index];
         final selected = feed.id == controller.selectedFeedId;
-        final articleCount = controller.articlesForFeed(feed.id).length;
+        final unread = controller.unreadCountForFeed(feed.id);
 
         return InkWell(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           onTap: () => controller.selectFeed(feed.id),
           child: Container(
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              color: selected
-                  ? Theme.of(context).colorScheme.primaryContainer
-                  : Theme.of(context).colorScheme.surfaceContainerHighest
-                        .withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(14),
+              color: selected ? colorScheme.secondaryContainer : null,
             ),
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             child: Row(
               children: [
-                const Icon(Icons.rss_feed_rounded),
-                const SizedBox(width: 12),
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: selected
+                      ? colorScheme.primary
+                      : colorScheme.surfaceContainerHighest,
+                  child: Icon(
+                    Icons.rss_feed_rounded,
+                    size: 16,
+                    color: selected
+                        ? colorScheme.onPrimary
+                        : colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         controller.titleForFeed(feed),
-                        style: Theme.of(context).textTheme.titleMedium,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          fontWeight: unread > 0
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                        ),
                       ),
-                      const SizedBox(height: 4),
                       Text(
                         feed.feedUrl.host.isEmpty
                             ? feed.feedUrl.toString()
                             : feed.feedUrl.host,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 12),
-                Chip(label: Text('$articleCount')),
+                const SizedBox(width: 8),
+                if (unread > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colorScheme.primary,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$unread',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: colorScheme.onPrimary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
                 PopupMenuButton<String>(
                   tooltip: 'Feed actions',
                   onSelected: (action) async {
@@ -457,55 +642,121 @@ class _ArticleList extends StatelessWidget {
         const SizedBox(height: 8),
         Expanded(
           child: articles.isEmpty
-              ? const Center(child: Text('No matching articles.'))
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.inbox_rounded,
+                        size: 48,
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                      const SizedBox(height: 12),
+                      const Text('No matching articles.'),
+                    ],
+                  ),
+                )
               : ListView.separated(
                   itemCount: articles.length,
                   separatorBuilder: (context, index) =>
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 4),
                   itemBuilder: (context, index) {
                     final article = articles[index];
-                    final state = controller.stateFor(article.id);
-                    final selected = article.id == controller.selectedArticleId;
-
-                    return ListTile(
-                      selected: selected,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      tileColor: selected
-                          ? Theme.of(context).colorScheme.primaryContainer
-                          : Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest
-                                .withValues(alpha: 0.45),
-                      onTap: () => controller.selectArticle(article.id),
-                      leading: Icon(
-                        state?.isStarred == true
-                            ? Icons.star_rounded
-                            : state?.isRead == true
-                            ? Icons.mark_email_read_rounded
-                            : Icons.article_rounded,
-                      ),
-                      title: Text(
-                        article.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: Text(
-                        article.summary ??
-                            article.contentText ??
-                            'No summary available.',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      trailing: state?.isRead == true
-                          ? const Icon(Icons.done_rounded)
-                          : null,
+                    return _ArticleTile(
+                      controller: controller,
+                      article: article,
                     );
                   },
                 ),
         ),
       ],
+    );
+  }
+}
+
+class _ArticleTile extends StatelessWidget {
+  const _ArticleTile({required this.controller, required this.article});
+
+  final ReaderDemoController controller;
+  final Article article;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isRead = controller.isRead(article.id);
+    final isStarred = controller.isStarred(article.id);
+    final selected = article.id == controller.selectedArticleId;
+    final feedTitle = controller.feedTitleById(article.feedId);
+    final time = _relativeTime(article.publishedAt);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => controller.selectArticle(article.id),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: selected ? colorScheme.secondaryContainer : null,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 7),
+              child: Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isRead ? Colors.transparent : colorScheme.primary,
+                  border: isRead
+                      ? Border.all(color: colorScheme.outlineVariant)
+                      : null,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    article.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      fontWeight: isRead ? FontWeight.w400 : FontWeight.w600,
+                      color: isRead ? colorScheme.onSurfaceVariant : null,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    [
+                      if (feedTitle.isNotEmpty) feedTitle,
+                      if (time.isNotEmpty) time,
+                    ].join(' - '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: isStarred ? 'Remove favorite' : 'Add to favorites',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => controller.toggleStar(article.id),
+              icon: Icon(
+                isStarred ? Icons.star_rounded : Icons.star_outline_rounded,
+                size: 20,
+                color: isStarred ? Colors.amber : colorScheme.outline,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -517,45 +768,87 @@ class _ArticleReader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final article = controller.selectedArticle;
     if (article == null) {
-      return const Center(child: Text('Select an article to read it offline.'));
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.chrome_reader_mode_outlined,
+              size: 48,
+              color: colorScheme.outline,
+            ),
+            const SizedBox(height: 12),
+            const Text('Select an article to read it offline.'),
+          ],
+        ),
+      );
     }
 
     final state = controller.stateFor(article.id);
+    final feedTitle = controller.feedTitleById(article.feedId);
+    final published = article.publishedAt?.toLocal();
+    final meta = <String>[
+      if (feedTitle.isNotEmpty) feedTitle,
+      if (article.author != null && article.author!.trim().isNotEmpty)
+        article.author!.trim(),
+      if (published != null)
+        '${published.year}-${published.month.toString().padLeft(2, '0')}-${published.day.toString().padLeft(2, '0')} '
+            '${published.hour.toString().padLeft(2, '0')}:${published.minute.toString().padLeft(2, '0')}',
+    ].join('  -  ');
 
     return ListView(
       padding: const EdgeInsets.only(right: 4),
       children: [
-        Text(article.title, style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Chip(label: Text(state?.isRead == true ? 'Read' : 'Unread')),
-            Chip(
-              label: Text(
-                state?.isStarred == true ? 'Favorite' : 'Not favorite',
+            Expanded(
+              child: Text(
+                article.title,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  height: 1.25,
+                ),
               ),
             ),
-            if (article.publishedAt != null)
-              Chip(label: Text('${article.publishedAt!.toLocal()}')),
+            IconButton(
+              tooltip: state?.isStarred == true
+                  ? 'Remove favorite'
+                  : 'Add to favorites',
+              onPressed: controller.toggleSelectedStar,
+              icon: Icon(
+                state?.isStarred == true
+                    ? Icons.star_rounded
+                    : Icons.star_outline_rounded,
+                color: state?.isStarred == true
+                    ? Colors.amber
+                    : colorScheme.outline,
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 16),
-        Text(
-          article.summary ??
-              article.contentText ??
-              'No offline content captured yet.',
-          style: Theme.of(context).textTheme.bodyLarge,
-        ),
-        const SizedBox(height: 16),
-        if (article.contentHtml != null)
-          Text(
-            article.contentText ?? article.contentHtml!,
-            style: Theme.of(context).textTheme.bodyMedium,
+        if (meta.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              meta,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
           ),
+        const SizedBox(height: 12),
+        Divider(color: colorScheme.outlineVariant.withValues(alpha: 0.6)),
+        const SizedBox(height: 12),
+        Text(
+          article.contentText ??
+              article.summary ??
+              'No offline content captured yet.',
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.6),
+        ),
         const SizedBox(height: 24),
         Wrap(
           spacing: 12,
@@ -571,14 +864,19 @@ class _ArticleReader extends StatelessWidget {
               ),
               label: Text(state?.isRead == true ? 'Mark unread' : 'Mark read'),
             ),
-            FilledButton.icon(
-              onPressed: controller.toggleSelectedStar,
-              icon: Icon(
-                state?.isStarred == true
-                    ? Icons.star_border_rounded
-                    : Icons.star_rounded,
-              ),
-              label: Text(state?.isStarred == true ? 'Unfavorite' : 'Favorite'),
+            OutlinedButton.icon(
+              onPressed: () async {
+                await Clipboard.setData(
+                  ClipboardData(text: article.canonicalUrl.toString()),
+                );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Article link copied.')),
+                  );
+                }
+              },
+              icon: const Icon(Icons.link_rounded),
+              label: const Text('Copy link'),
             ),
           ],
         ),
