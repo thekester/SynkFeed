@@ -2,7 +2,9 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
-import 'package:url_launcher/url_launcher.dart';
+
+import '../../app/open_link_io.dart'
+    if (dart.library.js_interop) '../../app/open_link_web.dart';
 
 /// Renders sanitized article HTML as Flutter widgets: paragraphs, headings,
 /// lists, quotes, code blocks, images, and tappable links. Scripts, styles,
@@ -47,7 +49,7 @@ class _ArticleHtmlViewState extends State<ArticleHtmlView> {
 
   TapGestureRecognizer _linkRecognizer(Uri url) {
     final recognizer = TapGestureRecognizer()
-      ..onTap = () => launchUrl(url, mode: LaunchMode.externalApplication);
+      ..onTap = () => openExternalUrl(url);
     _recognizers.add(recognizer);
     return recognizer;
   }
@@ -336,9 +338,7 @@ class _Renderer {
       Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: OutlinedButton.icon(
-          onPressed: source == null
-              ? null
-              : () => launchUrl(source, mode: LaunchMode.externalApplication),
+          onPressed: source == null ? null : () => openExternalUrl(source),
           icon: const Icon(Icons.open_in_new_rounded, size: 18),
           label: Text(
             source == null ? '$label (unavailable offline)' : 'Open $label',

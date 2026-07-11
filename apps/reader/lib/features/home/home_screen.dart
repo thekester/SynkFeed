@@ -4,8 +4,9 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:synkfeed_core/synkfeed_core.dart';
-import 'package:url_launcher/url_launcher.dart';
 
+import '../../app/open_link_io.dart'
+    if (dart.library.js_interop) '../../app/open_link_web.dart';
 import '../../app/reader_demo_controller.dart';
 import '../../app/sync_account_controller.dart';
 import 'article_html_view.dart';
@@ -1033,10 +1034,7 @@ class _ArticleReader extends StatelessWidget {
                 const Spacer(),
                 IconButton(
                   tooltip: 'Open the original article',
-                  onPressed: () => launchUrl(
-                    article.canonicalUrl,
-                    mode: LaunchMode.externalApplication,
-                  ),
+                  onPressed: () => openExternalUrl(article.canonicalUrl),
                   icon: const Icon(Icons.open_in_new_rounded, size: 20),
                 ),
                 IconButton(
@@ -1091,10 +1089,7 @@ class _ArticleReader extends StatelessWidget {
                   ),
                 ),
                 OutlinedButton.icon(
-                  onPressed: () => launchUrl(
-                    article.canonicalUrl,
-                    mode: LaunchMode.externalApplication,
-                  ),
+                  onPressed: () => openExternalUrl(article.canonicalUrl),
                   icon: const Icon(Icons.open_in_new_rounded),
                   label: const Text('Open original'),
                 ),
